@@ -1,37 +1,62 @@
 # section parameter values either affect the exe application or
 # correspond to global application parameters
+cutadapt:
+  parent_task: ratatosk.lib.files.fastq.FastqFileLink
+
+misc:
+  ResyncMates:
+    parent_task: ratatosk.lib.utils.cutadapt.CutadaptJobTask
+
 bwa:
   bwaref: ${bwaref}
-  InputFastqFile:
-    parent_task: ratatosk.fastq.FastqFileLink
 
 fastq:
   link:
     indir: ${fastq}
 
 gatk:
-  # NB: I don't know if these even works
   knownSites: 
     - ${knownSites1}
     - ${knownSites2}
   ref: ${ref}
   dbsnp: ${dbsnp}
+  RealignerTargetCreator:
+    parent_task: ratatosk.lib.tools.picard.MergeSamFiles
+  IndelRealigner:
+    parent_task: ratatosk.lib.tools.picard.MergeSamFiles
+  BaseRecalibrator:
+    parent_task: ratatosk.lib.tools.gatk.IndelRealigner
+  PrintReads:
+    parent_task: ratatosk.lib.tools.gatk.BaseRecalibrator
+  ClipReads:
+    parent_task: ratatosk.lib.tools.gatk.PrintReads
+  UnifiedGenotyper:
+    parent_task: ratatosk.lib.tools.gatk.ClipReads
+  VariantFiltration:
+    parent_task: ratatosk.lib.tools.gatk.UnifiedGenotyper
+  VariantEval:
+    parent_task: ratatosk.lib.tools.gatk.VariantFiltration
 
 picard:
-  # InputBamFile "pipes" input from other modules
   InputBamFile:
-    parent_task: ratatosk.samtools.SamToBam
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
+  SortSam:
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
   HsMetrics:
-    parent_task: ratatosk.picard.SortSam
-    targets: targets.interval_list
-    baits: targets.interval_list
+    parent_task: ratatosk.lib.tools.picard.SortSam
+    target_regions: ${targets}
+    bait_regions: ${baits}
   DuplicationMetrics:
-    parent_task: ratatosk.picard.SortSam
+    parent_task: ratatosk.lib.tools.picard.SortSam
   AlignmentMetrics:
-    parent_task: ratatosk.picard.SortSam
+    parent_task: ratatosk.lib.tools.picard.SortSam
   InsertMetrics:
-    parent_task: ratatosk.picard.SortSam
+    parent_task: ratatosk.lib.tools.picard.SortSam
+  MergeSamFiles:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+    target_generator_function: test.site_functions.organize_sample_runs
 
 samtools:
   SamToBam:
-    parent_task: test.test_wrapper.SampeToSamtools
+    parent_task: ratatosk.lib.align.bwa.BwaSampe
+

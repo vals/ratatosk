@@ -1,0 +1,42 @@
+# Project configuration file
+misc:
+  ResyncMates:
+    parent_task: ratatosk.lib.utils.cutadapt.CutadaptJobTask
+
+bwa:
+  bwaref: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/bwa/chr11.fa
+  aln:
+    parent_task: ratatosk.lib.utils.misc.ResyncMatesJobTask
+    options: [-e 2 -l 40]
+  
+samtools:
+  SamToBam:
+    parent_task: ratatosk.lib.align.bwa.BwaSampe
+
+picard:
+  HsMetrics:
+    target_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_targets.interval_list
+    bait_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_baits.interval_list
+  SortSam:
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
+  MergeSamFiles:
+    # How is this module found?!?
+    parent_task: ratatosk.lib.tools.picard.SortSam
+    target_generator_function: test.site_functions.organize_sample_runs
+
+gatk:
+  ref: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seq/chr11.fa
+  knownSites: 
+    - ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/variation/dbsnp132_chr11.vcf
+  dbsnp: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/variation/dbsnp132_chr11.vcf
+
+  RealignerTargetCreator:
+    options:
+  IndelRealigner:
+    options:
+
+pipeline:
+  HaloPlex:
+    target_generator_function: test.site_functions.target_generator
+  AlignSeqcap:
+    target_generator_function: test.site_functions.target_generator

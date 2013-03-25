@@ -15,33 +15,29 @@ import os
 import luigi
 import time
 import shutil
-from ratatosk.job import JobTask, DefaultShellJobRunner
+import random
+import logging
+from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner, DefaultGzShellJobRunner
 from cement.utils import shell
 
-class CutadaptJobRunner(DefaultShellJobRunner):
+logger = logging.getLogger('luigi-interface')
+
+# NB: Now subclass DefaultGzShellJobRunner
+class CutadaptJobRunner(DefaultGzShellJobRunner):
     pass
 
-class InputFastqFile(JobTask):
+class InputFastqFile(InputJobTask):
     _config_section = "cutadapt"
-    _config_subsection = "input_fastq_file"
-    target = luigi.Parameter(default=None)
-    parent_task = luigi.Parameter(default="ratatosk.external.FastqFile")
+    _config_subsection = "InputFastqFile"
+    parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastqFile")
     
-    def requires(self):
-        cls = self.set_parent_task()
-        return cls(target=self.target)
-    def output(self):
-        return luigi.LocalTarget(self.target)
-    def run(self):
-        pass
 
 # NB: cutadapt is a non-hiearchical tool. Group under, say, utils?
 class CutadaptJobTask(JobTask):
     _config_section = "cutadapt"
-    options = luigi.Parameter(default=None)
     label = luigi.Parameter(default=".trimmed")
-    cutadapt = luigi.Parameter(default="cutadapt")
-    parent_task = luigi.Parameter(default="ratatosk.cutadapt.InputFastqFile")
+    executable = luigi.Parameter(default="cutadapt")
+    parent_task = luigi.Parameter(default="ratatosk.lib.utils.cutadapt.InputFastqFile")
     # Use Illumina TruSeq adapter sequences as default
     threeprime = luigi.Parameter(default="AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC")
     fiveprime = luigi.Parameter(default="AGATCGGAAGAGCACACGTCTGAACTCCAGTCAC")
@@ -52,19 +48,8 @@ class CutadaptJobTask(JobTask):
         # Assume read 2 if no match...
         return self.input().fn.find(self.read1_suffix) > 0
 
-    def exe(self):
-        return self.cutadapt
-
     def job_runner(self):
         return CutadaptJobRunner()
-
-    def requires(self):
-        cls = self.set_parent_task()
-        source = self._make_source_file_name()
-        return cls(target=source)
-
-    def output(self):
-        return luigi.LocalTarget(self.target)
 
     def args(self):
         seq = self.threeprime if self.read1() else self.fiveprime

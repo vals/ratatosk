@@ -27,8 +27,10 @@ setup(name = "ratatosk",
       install_requires = [
         "drmaa >= 0.5",
         "mock",
+        # Currently works with luigi version 1.0, commit hash tag
+        # da20852fa10a60a388 - would want to put this here in master
+        # in case something breaks in the future
         "luigi",
-        "cement",
         "nose"
         ],
       test_suite = 'nose.collector',
@@ -39,7 +41,7 @@ setup(name = "ratatosk",
         'ratatosk':[
             'data/grf/*',
             'data/templates/*',
-            'data/config/*'
+            'config/*'
             ]}
       )
 

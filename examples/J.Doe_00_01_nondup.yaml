@@ -1,0 +1,51 @@
+# Project configuration file
+bwa:
+  bwaref: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/bwa/chr11.fa
+  aln:
+    options: [-e 2 -l 40]
+  
+samtools:
+  SamToBam:
+    parent_task: ratatosk.lib.align.bwa.BwaSampe
+
+picard:
+  HsMetricsNonDup:
+    target_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_targets.interval_list
+    bait_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_baits.interval_list
+  HsMetrics:
+    parent_task: ratatosk.lib.tools.picard.DuplicationMetrics
+    target_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_targets.interval_list
+    bait_regions: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seqcap/chr11_baits.interval_list
+  InsertMetrics:
+    parent_task: ratatosk.lib.tools.picard.DuplicationMetrics
+  AlignmentMetrics:
+    parent_task: ratatosk.lib.tools.picard.DuplicationMetrics
+  SortSam:
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
+  MergeSamFiles:
+    # How is this module found?!?
+    parent_task: ratatosk.lib.tools.picard.SortSam
+    target_generator_function: test.site_functions.organize_sample_runs
+  DuplicationMetrics:
+    parent_task: ratatosk.lib.tools.picard.MergeSamFiles
+  PicardMetrics:
+    parent_task: ratatosk.lib.tools.picard.DuplicationMetrics
+  PicardMetricsNonDup:
+    parent_task: ratatosk.lib.tools.picard.DuplicationMetrics
+
+gatk:
+  ref: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/seq/chr11.fa
+  knownSites: 
+    - ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/variation/dbsnp132_chr11.vcf
+  dbsnp: ~/opt/ngs_test_data/data/genomes/Hsapiens/hg19/variation/dbsnp132_chr11.vcf
+
+  RealignerTargetCreator:
+    options:
+  IndelRealigner:
+    options:
+
+pipeline:
+  HaloPlex:
+    target_generator_function: test.site_functions.target_generator
+  AlignSeqcap:
+    target_generator_function: test.site_functions.target_generator
