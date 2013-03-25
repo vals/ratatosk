@@ -19,12 +19,13 @@ import subprocess
 import logging
 import warnings
 import luigi
+import importlib
 from itertools import izip
 from luigi.task import flatten
-from cement.utils import shell
+import ratatosk.shell as shell
 import ratatosk
 from ratatosk import interface
-from ratatosk.utils import rreplace
+from ratatosk.utils import rreplace, update, utc_time
 
 # Use luigi-interface for now
 logger = logging.getLogger('luigi-interface')
@@ -48,8 +49,8 @@ class DefaultShellJobRunner(JobRunner):
                 if x.exists(): # input
                     args.append(x.path)
                 else: # output
-                    y = luigi.LocalTarget(x.path + \
-                                              '-luigi-tmp-%09d' % random.randrange(0, 1e10))
+                    ypath = x.path + '-luigi-tmp-%09d' % random.randrange(0, 1e10)
+                    y = luigi.LocalTarget(ypath)
                     logger.info("Using temp path: {0} for path {1}".format(y.path, x.path))
                     args.append(y.path)
                     if job.add_suffix():
@@ -75,12 +76,14 @@ class DefaultShellJobRunner(JobRunner):
         if job.main():
             arglist.append(self._get_main(job))
         if job.opts():
-            arglist.append(job.opts())
-        (tmp_files, job_args) = DefaultShellJobRunner._fix_paths(job)
+            arglist += job.opts()
+        # Need to call self.__class__ since fix_paths overridden in
+        # DefaultGzShellJobRunner
+        (tmp_files, job_args) = self.__class__._fix_paths(job)
         
         arglist += job_args
         cmd = ' '.join(arglist)
-        logger.info(cmd)
+        logger.info("\nJob runner '{0}';\n\trunning command '{1}'\n".format(self.__class__, cmd))
         (stdout, stderr, returncode) = shell.exec_cmd(cmd, shell=True)
         if returncode == 0:
             logger.info("Shell job completed")
@@ -94,22 +97,76 @@ class DefaultShellJobRunner(JobRunner):
         else:
             raise Exception("Job '{}' failed: \n{}".format(' '.join(arglist), " ".join([stderr])))
                 
+
+# Aaarrgh - it doesn't get uglier than this. Some programs
+# "seamlessly" read and write gzipped files. In the job runner we work
+# with temp files that lack the .gz suffix, so the output is not
+# compressed... Took me a while to figure out. Solution for now
+#  is to add suffix 'gz' to the temp file. Obviously this won't work
+#  for uncompressed input (SIGH), but as I discuss in issues, maybe
+#  this is a good thing.
+class DefaultGzShellJobRunner(DefaultShellJobRunner):
+    """Temporary fix for programs that determine if output is zipped
+    based on the suffix of the file name. When working with tmp files
+    this will not work so an extra .gz suffix needs to be added. This
+    should be taken care of in a cleaner way."""
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def _fix_paths(job):
+        """Modelled after hadoop_jar.HadoopJarJobRunner._fix_paths.
+        """
+        tmp_files = []
+        args = []
+        for x in job.args():
+            if isinstance(x, luigi.LocalTarget): # input/output
+                if x.exists(): # input
+                    args.append(x.path)
+                else: # output
+                    ypath = x.path + '-luigi-tmp-%09d' % random.randrange(0, 1e10) + '.gz'
+                    y = luigi.LocalTarget(ypath)
+                    logger.info("Using temp path: {0} for path {1}".format(y.path, x.path))
+                    args.append(y.path)
+                    if job.add_suffix():
+                        x = luigi.LocalTarget(x.path + job.add_suffix())
+                        y = luigi.LocalTarget(y.path + job.add_suffix())
+                    tmp_files.append((y, x))
+            else:
+                args.append(str(x))
+        return (tmp_files, args)
+
+
 class BaseJobTask(luigi.Task):
     config_file = luigi.Parameter(is_global=True, default=os.path.join(os.path.join(ratatosk.__path__[0], os.pardir, "config", "ratatosk.yaml")), description="Main configuration file.")
     custom_config = luigi.Parameter(is_global=True, default=None, description="Custom configuration file for tuning options in predefined pipelines in which workflow may not be altered.")
-    dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True)
+    dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Generate pipeline graph/flow without running any commands")
     restart = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Restart pipeline from scratch.")
-    options = luigi.Parameter(default=None)
-    parent_task = luigi.Parameter(default=None)
+    restart_from = luigi.Parameter(default=None, is_global=True, description="NOT YET IMPLEMENTED: Restart pipeline from a given task.")
+    print_config = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="NOT YET IMPLEMENTED: Print configuration for pipeline")
+    options = luigi.Parameter(default=(), description="Program options", is_list=True)
+    parent_task = luigi.Parameter(default=None, description="Main parent task from which the current task receives (parts) of its input")
     num_threads = luigi.Parameter(default=1)
+    # Track start time and end time; currently we need to set these as
+    # luigi parameters, otherwise they won't get passed to the graph
+    # and table visualization. Obviously, these aren't options in the
+    # true sense, but are set internally at runtime.
+    start_time = luigi.Parameter(default=None)
+    end_time = luigi.Parameter(default=None)
+
     # Note: output should generate one file only; in special cases we
     # need to do hacks
-    target = luigi.Parameter(default=None)
-    target_suffix = luigi.Parameter(default=None)
-    source_suffix = luigi.Parameter(default=None)
+    target = luigi.Parameter(default=None, description="Output target name")
+    target_suffix = luigi.Parameter(default=None, description="File suffix for target")
+    source_suffix = luigi.Parameter(default=None, description="File suffix for source")
     source = None
     # Use for changing labels in graph visualization
     use_long_names = luigi.Parameter(default=False, description="Use long names (including all options) in graph vizualization", is_boolean=True, is_global=True)
+    # Name of executable to run a program
+    executable = None
+    # Name of 'sub_executable' (e.g. for GATK, bwa). 
+    sub_executable = None
+    
     # Needed for merging samples; list of tuples (sample, sample_run)
     # sample_runs = luigi.Parameter(default=[], is_global=True)
     sample_runs = []
@@ -122,6 +179,8 @@ class BaseJobTask(luigi.Task):
     # Not all tasks are allowed to "label" their output
     label = luigi.Parameter(default=None)
     suffix = luigi.Parameter(default=None)
+    # Global configuration
+    global_config = dict()
 
     def __init__(self, *args, **kwargs):
         params = self.get_params()
@@ -136,6 +195,10 @@ class BaseJobTask(luigi.Task):
                 custom_config = value
                 kwargs = self._update_config(custom_config, disable_parent_task_update=True, *args, **kwargs)
         super(BaseJobTask, self).__init__(*args, **kwargs)
+        if self.print_config:
+            logger.setLevel(logging.INFO)
+            # Move to print_config function for better processing
+            print "Global configuration: " + str(self.global_config)
         if self.dry_run:
             print "DRY RUN: " + str(self)
 
@@ -145,6 +208,8 @@ class BaseJobTask(luigi.Task):
     def _update_config(self, config_file, disable_parent_task_update=False, *args, **kwargs):
         """Update configuration for this task"""
         config = interface.get_config(config_file)
+        #Update global configuration here for printing everything in run() function
+        #self.global_config = update(self.global_config, config)
         if not config:
             return kwargs
         if not config.has_section(self._config_section):
@@ -156,7 +221,7 @@ class BaseJobTask(luigi.Task):
             # Got a command line option => override config file
             if value.default != param_values.get(key, None):
                 new_value = param_values.get(key, None)
-                logger.debug("option '{0}'; got value '{1}' from command line, overriding configuration file setting for task class '{2}'".format(key, new_value, self.__class__))
+                logger.debug("option '{0}'; got value '{1}' from command line, overriding configuration file setting default '{2}' for task class '{3}'".format(key, new_value, value.default, self.__class__))
             else:
                 if config.has_key(self._config_section, key):
                     new_value = config.get(self._config_section, key)
@@ -173,20 +238,35 @@ class BaseJobTask(luigi.Task):
                     logger.debug("Updating config, setting '{0}' to '{1}' for task class '{2}'".format(key, new_value, self.__class__))
             else:
                 pass
-            logger.debug("Using default value for '{0}' for task class '{1}'".format(key, self.__class__))
+            logger.debug("Using default value '{0}' for '{1}' for task class '{2}'".format(value.default, key, self.__class__))
         return kwargs
 
     def exe(self):
-        """Executable"""
-        return None
+        """Executable of this task."""
+        return self.executable
 
     def main(self):
         """For commands that have subcommands"""
-        return None
+        return self.sub_executable
 
     def opts(self):
-        """Generic options placeholder"""
-        return self.options
+        """Generic options placeholder.
+
+        :returns: the options list
+        :rtype: list
+
+        """
+        return list(self.options)
+
+    def args(self):
+        """Generic argument list. Used to generate list of required
+        inputs and outputs. Needs implementation in task subclasses.
+
+        :returns: the argument list
+        :rtype: list
+
+        """
+        pass
 
     def threads(self):
         """Get number of threads."""
@@ -206,21 +286,41 @@ class BaseJobTask(luigi.Task):
         return ""
         
     def init_local(self):
-        """Setup local settings (e.g. read from config file?)
-
-        """
+        """Setup local settings"""
         pass
 
     def run(self):
+        """Init job runner.
+
+        FIXME: start_time and end_time don't currently get recorded
+        """
+        self.start_time = utc_time()
         self.init_local()
         if not self.dry_run:
             self.job_runner().run_job(self)
+        self.end_time = utc_time()
+
+
+    def output(self):
+        """Task output. In many cases this defaults to the target and
+        doesn't need reimplementation in the subclasses. """
+        return luigi.LocalTarget(self.target)
+
+    def requires(self):
+        """Task requirements. In many cases this is a single source
+        whose name can be generated following the code below, and
+        therefore doesn't need reimplementation in the subclasses."""
+        cls = self.set_parent_task()
+        source = self._make_source_file_name()
+        return cls(target=source)
 
     def complete(self):
         """
         If the task has any outputs, return true if all outputs exists.
         Otherwise, return whether or not the task has run or not
         """
+        if self.print_config:
+            return True
         outputs = flatten(self.output())
         inputs = flatten(self.input())
         if self.dry_run:
@@ -248,9 +348,30 @@ class BaseJobTask(luigi.Task):
                 return value.default
         return None
 
+    def set_target_generator_function(self):
+        """Try to import a module task class represented as string in
+        target_generator_function and use it as such.
+
+        """
+        opt_mod = ".".join(self.target_generator_function.split(".")[0:-1])
+        opt_fn = self.target_generator_function.split(".")[-1]
+        if not self.target_generator_function:
+            return None
+        try:
+            m = __import__(opt_mod, fromlist=[opt_fn])
+            fn = getattr(sys.modules[m.__name__], opt_fn)
+            return fn
+        except:
+            logger.warn("No function '{}' found: need to define a generator function for task '{}'".format(".".join([opt_mod, opt_fn]), 
+                                                                                                           self.__class__))
+            return None
+        
+
     def set_parent_task(self):
         """Try to import a module task class represented as string in
-        parent_task and use it as such
+        parent_task and use it as such.
+
+        TODO: handle parent task list where tasks have several requirements?
         """
         opt_mod = ".".join(self.parent_task.split(".")[0:-1])
         opt_cls = self.parent_task.split(".")[-1]
@@ -262,8 +383,9 @@ class BaseJobTask(luigi.Task):
             cls = getattr(mod, opt_cls)
             ret_cls = cls
         except:
-            logger.warn("No class {} found: using default class {}".format(".".join([opt_mod, opt_cls]), 
-                                                                           ".".join([default_mod, default_cls])))
+            logger.warn("No class {} found: using default class {} for task '{}'".format(".".join([opt_mod, opt_cls]), 
+                                                                                         ".".join([default_mod, default_cls]),
+                                                                                         self.__class__))
             ret_mod = __import__(default_mod, fromlist=[default_cls])
             ret_cls = getattr(ret_mod, default_cls)
         return ret_cls
@@ -371,6 +493,68 @@ class JobTask(BaseJobTask):
     def args(self):
         return []
 
+class InputJobTask(JobTask):
+    """Input job task. Should have as a parent task one of the tasks
+    in ratatosk.lib.files.external"""
+    def requires(self):
+        cls = self.set_parent_task()
+        return cls(target=self.target)
+    
+    def run(self):
+        """No run should be defined"""
+        pass
+
+class JobWrapperTask(JobTask):
+    """Wrapper task that adds target by default"""
+    def complete(self):
+        return all(r.complete() for r in flatten(self.requires()))
+
+    def run(self):
+        pass
+
+class PipelineTask(JobWrapperTask):
+    """Wrapper task for predefined pipelines. Adds option
+    target_generator_function which must be defined in order to
+    collect targets.
+    """
+    target_generator_function = luigi.Parameter(default=None)
+
+    def set_target_generator_function(self):
+        """Try to import a module task class represented as string in
+        target_generator_function and use it as such.
+
+        """
+        opt_mod = ".".join(self.target_generator_function.split(".")[0:-1])
+        opt_fn = self.target_generator_function.split(".")[-1]
+        if not self.target_generator_function:
+            return None
+        try:
+            m = __import__(opt_mod, fromlist=[opt_fn])
+            fn = getattr(sys.modules[m.__name__], opt_fn)
+            return fn
+        except:
+            logger.warn("No function '{}' found: need to define a generator function for task '{}'".format(".".join([opt_mod, opt_fn]), 
+                                                                                                           self.__class__))
+            return None
+    
+
+    
+class PrintConfig(luigi.Task):
+    """Print global configuration for a task, including all parameters
+    (customizations as well as defaults) and absolute path names to
+    program executables (thus implicitly in many cases giving the
+    program version, although there should be another function for
+    getting program version information and inserting that info here).
+    This task (or function) should probably be called after the last
+    task so that we know the exact parameter settings and programs
+    used to run an analysis. Aim for reproducible research :)
+
+    """
+
+    def run(self):
+        print "Print config"
+    
+
 def name_prefix():
     """Generate a name prefix based on available labels for task
     graph. Traverse dependency tree, recording all possible joins of
@@ -389,4 +573,5 @@ def name_prefix():
     """ 
 
     pass
+
 
