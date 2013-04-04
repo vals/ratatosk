@@ -21,21 +21,15 @@ from ratatosk.utils import rreplace
 from ratatosk.job import InputJobTask, JobWrapperTask, JobTask, DefaultShellJobRunner
 import ratatosk.shell as shell
 
-# TODO: make these configurable 
-JAVA="java"
-JAVA_OPTS="-Xmx2g"
-PICARD_HOME=os.getenv("PICARD_HOME")
-
 logger = logging.getLogger('luigi-interface')
 
 class PicardJobRunner(DefaultShellJobRunner):
-    path = PICARD_HOME
     def run_job(self, job):
-        if not job.jar() or not os.path.exists(os.path.join(self.path,job.jar())):
+        if not job.jar() or not os.path.exists(os.path.join(job.path(),job.jar())):
             logger.error("Can't find jar: {0}, full path {1}".format(job.jar(),
                                                                      os.path.abspath(job.jar())))
             raise Exception("job jar does not exist")
-        arglist = [JAVA] + job.java_opt() + ['-jar', os.path.join(self.path, job.jar())]
+        arglist = [job.java()] + job.java_opt() + ['-jar', os.path.join(job.path(), job.jar())]
         if job.main():
             arglist.append(job.main())
         if job.opts():
@@ -69,11 +63,14 @@ class InputBamFile(JobTask):
 
 class PicardJobTask(JobTask):
     _config_section = "picard"
+    java_exe = "java"
     java_options = luigi.Parameter(default=("-Xmx2g",), is_list=True)
+    exe_path = luigi.Parameter(default=os.getenv("PICARD_HOME") if os.getenv("PICARD_HOME") else os.curdir)
     executable = luigi.Parameter(default=None)
     parent_task = luigi.Parameter(default="ratatosk.lib.tools.picard.InputBamFile")
     target_suffix = luigi.Parameter(default=".bam")
     source_suffix = luigi.Parameter(default=".bam")
+    ref = luigi.Parameter(default=None)
 
     def jar(self):
         """Path to the jar for this Picard job"""
@@ -87,6 +84,9 @@ class PicardJobTask(JobTask):
 
     def job_runner(self):
         return PicardJobRunner()
+
+    def java(self):
+        return self.java_exe
 
     def requires(self):
         cls = self.set_parent_task()
@@ -127,7 +127,13 @@ class AlignmentMetrics(PicardJobTask):
     _config_subsection = "AlignmentMetrics"
     executable = "CollectAlignmentSummaryMetrics.jar"
     target_suffix = luigi.Parameter(default=".align_metrics")
-    
+
+    def opts(self):
+        retval = list(self.options)
+        if self.ref:
+            retval += [" REFERENCE_SEQUENCE={}".format(self.ref)]
+        return retval
+
     def args(self):
         return ["INPUT=", self.input(), "OUTPUT=", self.output()]
 
@@ -135,6 +141,12 @@ class InsertMetrics(PicardJobTask):
     _config_subsection = "InsertMetrics"
     executable = "CollectInsertSizeMetrics.jar"
     target_suffix = luigi.Parameter(default=(".insert_metrics", ".insert_hist"), is_list=True)
+
+    def opts(self):
+        retval = list(self.options)
+        if self.ref:
+            retval += [" REFERENCE_SEQUENCE={}".format(self.ref)]
+        return retval
     
     def output(self):
         return [luigi.LocalTarget(self.target),
@@ -158,6 +170,12 @@ class HsMetrics(PicardJobTask):
     target_regions = luigi.Parameter(default=None)
     target_suffix = luigi.Parameter(default=".hs_metrics")
     
+    def opts(self):
+        retval = list(self.options)
+        if self.ref:
+            retval += [" REFERENCE_SEQUENCE={}".format(self.ref)]
+        return retval
+
     def args(self):
         if not self.bait_regions or not self.target_regions:
             raise Exception("need bait and target regions to run CalculateHsMetrics")

@@ -14,7 +14,8 @@
 import random
 import sys
 import os
-import datetime
+import yaml
+from datetime import datetime
 import subprocess
 import logging
 import warnings
@@ -25,7 +26,7 @@ from luigi.task import flatten
 import ratatosk.shell as shell
 import ratatosk
 from ratatosk import interface
-from ratatosk.utils import rreplace, update, utc_time
+from ratatosk.utils import rreplace, update, config_to_dict
 
 # Use luigi-interface for now
 logger = logging.getLogger('luigi-interface')
@@ -68,11 +69,15 @@ class DefaultShellJobRunner(JobRunner):
         return job.main()
 
     def run_job(self, job):
-        if not job.exe():# or not os.path.exists(job.exe()):
-            logger.error("Can't find executable: {0}, full path {1}".format(job.exe(),
-                                                                            os.path.abspath(job.exe())))
+        if job.path():
+            exe = os.path.join(job.path(), job.exe())
+        else:
+            exe = job.exe()
+        if not exe:# or not os.path.exists(exe):
+            logger.error("Can't find executable: {0}, full path {1}".format(exe,
+                                                                            os.path.abspath(exe)))
             raise Exception("executable does not exist")
-        arglist = [job.exe()]
+        arglist = [exe]
         if job.main():
             arglist.append(self._get_main(job))
         if job.opts():
@@ -143,17 +148,9 @@ class BaseJobTask(luigi.Task):
     dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Generate pipeline graph/flow without running any commands")
     restart = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Restart pipeline from scratch.")
     restart_from = luigi.Parameter(default=None, is_global=True, description="NOT YET IMPLEMENTED: Restart pipeline from a given task.")
-    print_config = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="NOT YET IMPLEMENTED: Print configuration for pipeline")
     options = luigi.Parameter(default=(), description="Program options", is_list=True)
     parent_task = luigi.Parameter(default=None, description="Main parent task from which the current task receives (parts) of its input")
     num_threads = luigi.Parameter(default=1)
-    # Track start time and end time; currently we need to set these as
-    # luigi parameters, otherwise they won't get passed to the graph
-    # and table visualization. Obviously, these aren't options in the
-    # true sense, but are set internally at runtime.
-    start_time = luigi.Parameter(default=None)
-    end_time = luigi.Parameter(default=None)
-
     # Note: output should generate one file only; in special cases we
     # need to do hacks
     target = luigi.Parameter(default=None, description="Output target name")
@@ -162,24 +159,22 @@ class BaseJobTask(luigi.Task):
     source = None
     # Use for changing labels in graph visualization
     use_long_names = luigi.Parameter(default=False, description="Use long names (including all options) in graph vizualization", is_boolean=True, is_global=True)
+
+    # Path to main program; used by job runner
+    exe_path = luigi.Parameter(default=None)
     # Name of executable to run a program
     executable = None
     # Name of 'sub_executable' (e.g. for GATK, bwa). 
     sub_executable = None
     
-    # Needed for merging samples; list of tuples (sample, sample_run)
-    # sample_runs = luigi.Parameter(default=[], is_global=True)
-    sample_runs = []
     _config_section = None
     _config_subsection = None
-    task_id = None
     n_reduce_tasks = 8
     can_multi_thread = False
     max_memory_gb = 3
     # Not all tasks are allowed to "label" their output
     label = luigi.Parameter(default=None)
-    suffix = luigi.Parameter(default=None)
-    # Global configuration
+    # Global configuration - this must be a class variable
     global_config = dict()
 
     def __init__(self, *args, **kwargs):
@@ -189,33 +184,47 @@ class BaseJobTask(luigi.Task):
         for key, value in param_values:
             if key == "config_file":
                 config_file = value
-                kwargs = self._update_config(config_file, *args, **kwargs)
+                config = interface.get_config()
+                config.add_config_path(config_file)
+                kwargs = self._update_config(config, *args, **kwargs)
         for key, value in param_values:
             if key == "custom_config":
-                custom_config = value
+                if not value:
+                    continue
+                custom_config_file = value
+                # This must be a separate instance
+                custom_config = interface.get_custom_config()
+                custom_config.add_config_path(custom_config_file)
                 kwargs = self._update_config(custom_config, disable_parent_task_update=True, *args, **kwargs)
         super(BaseJobTask, self).__init__(*args, **kwargs)
-        if self.print_config:
-            logger.setLevel(logging.INFO)
-            # Move to print_config function for better processing
-            print "Global configuration: " + str(self.global_config)
         if self.dry_run:
             print "DRY RUN: " + str(self)
 
-    def __repr__(self):
-        return self.task_id
+    def _update_config(self, config, disable_parent_task_update=False, *args, **kwargs):
+        """Update configuration for this task. All task options should
+        have a default. Order of preference:
 
-    def _update_config(self, config_file, disable_parent_task_update=False, *args, **kwargs):
-        """Update configuration for this task"""
-        config = interface.get_config(config_file)
-        #Update global configuration here for printing everything in run() function
-        #self.global_config = update(self.global_config, config)
+        1. if command line option encountered, override config file settings
+        2. if configuration file has a setting, override default value for task.
+
+        :param config: configuration instance
+        :param disable_parent_task_update: disable parent task update for custom configurations (best practice pipeline execution order should stay fixed)
+
+        :returns: an updated parameter list for the task.
+        """
+        # Update global configuration here for printing everything in PrintConfig task
+        interface.global_config = update(interface.global_config, vars(config)["_sections"])
         if not config:
             return kwargs
         if not config.has_section(self._config_section):
             return kwargs
         params = self.get_params()
         param_values = {x[0]:x[1] for x in self.get_param_values(params, args, kwargs)}
+        if not self._config_subsection:
+            d = {self._config_section:param_values}
+        else:
+            d = {self._config_section:{self._config_subsection:param_values}}
+        interface.global_config = update(interface.global_config, d)
         for key, value in self.get_params():
             new_value = None
             # Got a command line option => override config file
@@ -240,6 +249,10 @@ class BaseJobTask(luigi.Task):
                 pass
             logger.debug("Using default value '{0}' for '{1}' for task class '{2}'".format(value.default, key, self.__class__))
         return kwargs
+
+    def path(self):
+        """Main path of this executable"""
+        return self.exe_path
 
     def exe(self):
         """Executable of this task."""
@@ -291,15 +304,10 @@ class BaseJobTask(luigi.Task):
 
     def run(self):
         """Init job runner.
-
-        FIXME: start_time and end_time don't currently get recorded
         """
-        self.start_time = utc_time()
         self.init_local()
         if not self.dry_run:
             self.job_runner().run_job(self)
-        self.end_time = utc_time()
-
 
     def output(self):
         """Task output. In many cases this defaults to the target and
@@ -319,8 +327,6 @@ class BaseJobTask(luigi.Task):
         If the task has any outputs, return true if all outputs exists.
         Otherwise, return whether or not the task has run or not
         """
-        if self.print_config:
-            return True
         outputs = flatten(self.output())
         inputs = flatten(self.input())
         if self.dry_run:
@@ -335,8 +341,9 @@ class BaseJobTask(luigi.Task):
             if not output.exists():
                 return False
             # Local addition: if any dependency is newer, then run
-            if any([os.stat(x.fn).st_mtime > os.stat(output.fn).st_mtime for x in inputs if x.exists()]):
-                return False
+            # 20120329: causes troubles for annovar download, commenting out for now
+            # if any([os.stat(x.fn).st_mtime > os.stat(output.fn).st_mtime for x in inputs if x.exists()]):
+            #     return False
         else:
             return True
 
@@ -349,7 +356,7 @@ class BaseJobTask(luigi.Task):
         return None
 
     def set_target_generator_function(self):
-        """Try to import a module task class represented as string in
+        """Try to import a module function represented as string in
         target_generator_function and use it as such.
 
         """
@@ -365,7 +372,6 @@ class BaseJobTask(luigi.Task):
             logger.warn("No function '{}' found: need to define a generator function for task '{}'".format(".".join([opt_mod, opt_fn]), 
                                                                                                            self.__class__))
             return None
-        
 
     def set_parent_task(self):
         """Try to import a module task class represented as string in
@@ -435,10 +441,10 @@ class BaseJobTask(luigi.Task):
         """
         source = self.target
         if isinstance(self.target_suffix, tuple):
-            if self.target_suffix[0] and self.source_suffix:
+            if self.target_suffix[0] and not self.source_suffix is None:
                 source = rreplace(source, self.target_suffix[0], self.source_suffix, 1)
         else:
-            if self.target_suffix and self.source_suffix:
+            if self.target_suffix and not self.source_suffix is None:
                 source = rreplace(source, self.target_suffix, self.source_suffix, 1)
         if not self.label:
             return source
@@ -448,43 +454,7 @@ class BaseJobTask(luigi.Task):
             logger.warn("label '{}' not found in target '{}'; are you sure your target is correctly formatted?".format(self.label, source))
         return rreplace(source, self.label, "", 1)
 
-    # these functions are needed to add label information to the
-    # self.input(), which is generated by the self.requires()
-    # function. In many cases, this should be identical to 
-    # self.targets, but here return luigi.LocalTarget's
-    def add_label_to_input(self):
-        """Add label to input which has been generated from the
-        requires function. 
-        """
-        if isinstance(self.input(), list):
-            if not self.label:
-                return [luigi.LocalTarget(x.fn) for x in self.input()]
-            else:
-                return [luigi.LocalTarget(os.path.splitext(x.fn)[0] + self.label + os.path.splitext(x.fn)[1]) for x in self.input()]
-        else:
-            if not self.label:
-                return luigi.LocalTarget(self.input().fn)
-            else:
-                return luigi.LocalTarget(os.path.splitext(self.input().fn)[0] + self.label + os.path.splitext(self.input().fn))[1]
             
-    # Make a general utility function
-    def replace_suffix(self, new_suffix=None):
-        """Replace suffix of input with new suffix. Old suffix is
-        calculated by os.path.splitext, so here we depend on file.txt
-        type file names.
-
-        """
-        if isinstance(self.input(), list):
-            if not new_suffix:
-                return [luigi.LocalTarget(x.fn) for x in self.input()]
-            else:
-                return [luigi.LocalTarget(os.path.splitext(x.fn)[0] + new_suffix) for x in self.input()]
-        else:
-            if not new_suffix:
-                return luigi.LocalTarget(self.input().fn)
-            else:
-                return luigi.LocalTarget(os.path.splitext(x.fn) + new_suffix)
-
                         
 class JobTask(BaseJobTask):
     def job_runner(self):
@@ -512,6 +482,20 @@ class JobWrapperTask(JobTask):
     def run(self):
         pass
 
+class GenericWrapper(JobWrapperTask):
+    """Generic task wrapper"""
+    generic_wrapper_target = luigi.Parameter(default=(), is_list=True)
+    task = luigi.Parameter(default=None)
+
+    def requires(self):
+        from luigi.task import Register
+        if not self.task in Register.get_reg().keys():
+            logger.warn("No such task {} in registry; skipping".format(self.task))
+            return []
+        else:
+            cls = Register.get_reg()[self.task]
+            return [cls(target=x) for x in self.generic_wrapper_target]
+
 class PipelineTask(JobWrapperTask):
     """Wrapper task for predefined pipelines. Adds option
     target_generator_function which must be defined in order to
@@ -537,23 +521,40 @@ class PipelineTask(JobWrapperTask):
                                                                                                            self.__class__))
             return None
     
-
     
-class PrintConfig(luigi.Task):
-    """Print global configuration for a task, including all parameters
-    (customizations as well as defaults) and absolute path names to
-    program executables (thus implicitly in many cases giving the
-    program version, although there should be another function for
+class PrintConfig(JobTask):
+    """Print global configuration for all tasks, including all
+    parameters (customizations as well as defaults) and absolute path
+    names to program executables (thus implicitly in many cases giving
+    the program version, although there should be another function for
     getting program version information and inserting that info here).
     This task (or function) should probably be called after the last
     task so that we know the exact parameter settings and programs
     used to run an analysis. Aim for reproducible research :)
-
     """
+    header = """# Created by {program} on {date}
+#
+# Command: TODO: insert command here 
+#
+# The ratatosk configuration file collects all configuration settings
+# for a run. In principle you could use this file as input to rerun
+# the analysis preserving exactly the same settings.
+#
+""".format(program="ratatosk", date=datetime.today().strftime("at %H:%M on %A %d, %B %Y"))
+
+    def requires(self):
+        return []
+
+    def output(self):
+        filename = "ratatosk_config_{}.yaml".format(datetime.today().strftime("%Y_%m_%d_%H_%M"))
+        with open(filename, "w") as fh:
+            fh.write(self.header)
+            fh.write(yaml.safe_dump(config_to_dict(interface.global_config), default_flow_style=False, allow_unicode=True, width=1000))
+        return luigi.LocalTarget(filename)
 
     def run(self):
-        print "Print config"
-    
+        return NotImplemented
+
 
 def name_prefix():
     """Generate a name prefix based on available labels for task

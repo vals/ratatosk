@@ -23,18 +23,20 @@ logger = logging.getLogger('luigi-interface')
 
 # http://stackoverflow.com/questions/3232943/update-value-of-a-nested-dictionary-of-varying-depth
 # FIX ME: make override work
-def update(d, u, override=True):
+def update(d, u, override=True, expandvars=True):
     """Update values of a nested dictionary of varying depth"""
     for k, v in u.iteritems():
         if isinstance(v, collections.Mapping):
             r = update(d.get(k, {}), v)
             d[k] = r
         else:
+            if expandvars and isinstance(v, str):
+                u[k] = os.path.expandvars(v)
             d[k] = u[k]
     return d
 
-# FIXME: this is obsolete!
-from cement.core import config
+# FIXME: implement replacement for cement.ConfigHandler check
+# Would allow passing d["_sections"] or d
 def config_to_dict(d):
     """Convert config handler or OrderedDict entries to dict for yaml
     output.
@@ -43,9 +45,7 @@ def config_to_dict(d):
     """
     if d is None:
         return {}
-    if isinstance(d, config.CementConfigHandler):
-        d = d._sections
-    elif isinstance(d, dict):
+    if isinstance(d, dict):
         pass
     else:
         raise TypeError("unsupported type <{}>".format(type(d)))
@@ -61,36 +61,8 @@ def config_to_dict(d):
         else:
             u[k] = v
     return u
-        
-# Make a general utility function
-def replace_suffix(luigi_param, new_suffix=None):
-    """Replace suffix of input with new suffix. Old suffix is
-    calculated by os.path.splitext, so here we depend on file.txt
-    type file names.
 
-    :param luigi_param: luigi.Parameter object
-    """
-    if not new_suffix:
-        return luigi.LocalTarget(self.input().fn)
-    else:
-        return luigi.LocalTarget(os.path.splitext(x.fn) + new_suffix)
-
-# def add_label_to_input():
-#     """Add label to input which has been generated from the
-#     requires function. 
-#     """
-#     if isinstance(linput, list):
-#         if not .label:
-#             return [luigi.LocalTarget(x.fn) for x in self.input()]
-#         else:
-#             return [luigi.LocalTarget(os.path.splitext(x.fn)[0] + self.label + os.path.splitext(x.fn)[1]) for x in self.input()]
-#     else:
-#         if not self.label:
-#             return luigi.LocalTarget(self.input().fn)
-#         else:
-#             return luigi.LocalTarget(os.path.splitext(self.input().fn)[0] + self.label + os.path.splitext(self.input().fn))[1]
 # http://stackoverflow.com/questions/2556108/how-to-replace-the-last-occurence-of-an-expression-in-a-string
-
 def rreplace(s, old, new, occurrence):
     li = s.rsplit(old, occurrence)
     return new.join(li)
@@ -134,8 +106,47 @@ def make_fastq_links(targets, indir, outdir, fastq_suffix="001.fastq.gz", ssheet
             if not os.path.exists(newpath):
                 logger.info("Linking {} -> {}".format(newpath, os.path.abspath(f)))
                 os.symlink(os.path.abspath(f), newpath)
+            if not os.path.lexists(os.path.join(os.path.dirname(newpath), ssheet)) and os.path.exists(os.path.abspath(os.path.join(os.path.dirname(f), ssheet))):
+                os.symlink(os.path.abspath(os.path.join(os.path.dirname(f), ssheet)), os.path.join(os.path.dirname(newpath), ssheet))
         newtargets.append((tgt[0], 
                            os.path.join(outdir, os.path.relpath(tgt[1], indir)),
                            os.path.join(outdir, os.path.relpath(tgt[2], indir))))
     return newtargets
-        
+    
+# Shamelessly stolen from http://twistedmatrix.com/trac/browser/tags/releases/twisted-8.2.0/twisted/python/procutils.py
+# See http://stackoverflow.com/questions/5226958/which-equivalent-function-in-python    
+def which(name, flags=os.X_OK):
+    """Search PATH for executable files with the given name.
+    
+    On newer versions of MS-Windows, the PATHEXT environment variable will be
+    set to the list of file extensions for files considered executable. This
+    will normally include things like ".EXE". This fuction will also find files
+    with the given name ending with any of these extensions.
+	
+    On MS-Windows the only flag that has any meaning is os.F_OK. Any other
+    flags will be ignored.
+    
+    @type name: C{str}
+    @param name: The name for which to search.
+    
+    @type flags: C{int}
+    @param flags: Arguments to L{os.access}.
+    
+    @rtype: C{list}
+    @param: A list of the full paths to files found, in the
+    order in which they were found.
+    """
+    result = []
+    exts = filter(None, os.environ.get('PATHEXT', '').split(os.pathsep))
+    path = os.environ.get('PATH', None)
+    # if path is None:
+    #     return []
+    # for p in os.environ.get('PATH', '').split(os.pathsep):
+    #     p = os.path.join(p, name)
+    #     if os.access(p, flags):
+    #         result.append(p)
+    #         for e in exts:
+	#             pext = p + e
+    #             if os.access(pext, flags):
+	#                 result.append(pext)
+    return result

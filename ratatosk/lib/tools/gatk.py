@@ -21,25 +21,17 @@ import ratatosk.shell as shell
 
 logger = logging.getLogger('luigi-interface')
 
-JAVA="java"
-JAVA_OPTS="-Xmx2g"
-GATK_HOME=os.getenv("GATK_HOME")
-GATK_JAR="GenomeAnalysisTK.jar"
-
 class GATKJobRunner(DefaultShellJobRunner):
-    # How configure this best way?
-    path = GATK_HOME
-
     @staticmethod
     def _get_main(job):
         return "-T {}".format(job.main())
 
     def run_job(self, job):
-        if not job.jar() or not os.path.exists(os.path.join(self.path,job.jar())):
+        if not job.jar() or not os.path.exists(os.path.join(job.path(),job.jar())):
             logger.error("Can't find jar: {0}, full path {1}".format(job.jar(),
                                                                      os.path.abspath(job.jar())))
             raise Exception("job jar does not exist")
-        arglist = [JAVA] + job.java_opt() + ['-jar', os.path.join(self.path, job.jar())]
+        arglist = [job.java()] + job.java_opt() + ['-jar', os.path.join(job.path(), job.jar())]
         if job.main():
             arglist.append(self._get_main(job))
         if job.opts():
@@ -78,9 +70,11 @@ class InputVcfFile(InputJobTask):
     
 class GATKJobTask(JobTask):
     _config_section = "gatk"
-    executable = luigi.Parameter(default=GATK_JAR)
+    exe_path = luigi.Parameter(default=os.getenv("GATK_HOME") if os.getenv("GATK_HOME") else os.curdir)
+    executable = luigi.Parameter(default="GenomeAnalysisTK.jar")
     source_suffix = luigi.Parameter(default=".bam")
     target_suffix = luigi.Parameter(default=".bam")
+    java_exe = luigi.Parameter(default="java")
     java_options = luigi.Parameter(default=("-Xmx2g",), description="Java options", is_list=True)
     parent_task = luigi.Parameter(default="ratatosk.lib.tools.gatk.InputBamFile")
     ref = luigi.Parameter(default=None)
@@ -95,6 +89,9 @@ class GATKJobTask(JobTask):
 
     def java_opt(self):
         return list(self.java_options)
+
+    def java(self):
+        return self.java_exe
 
     def job_runner(self):
         return GATKJobRunner()
@@ -118,13 +115,15 @@ class RealignerTargetCreator(GATKIndexedJobTask):
     sub_executable = "RealignerTargetCreator"
     known = luigi.Parameter(default=(), is_list=True)
     target_suffix = luigi.Parameter(default=".intervals")
+    can_multi_thread = True
 
     def opts(self):
         retval = list(self.options)
+        retval.append("-nt {}".format(self.num_threads))
         if self.target_region:
             retval.append("-L {}".format(self.target_region))
         retval.append(" ".join(["-known {}".format(x) for x in self.known]))
-        return " ".join(retval)
+        return retval
 
     def requires(self):
         cls = self.set_parent_task()
@@ -157,7 +156,7 @@ class IndelRealigner(GATKIndexedJobTask):
     def opts(self):
         retval = list(self.options)
         retval += ["{}".format(" ".join(["-known {}".format(x) for x in self.known]))]
-        return " ".join(retval)
+        return retval
 
     def args(self):
         retval = ["-I", self.input()[0], "-o", self.output(), "--targetIntervals", self.input()[2]]
@@ -285,6 +284,61 @@ class VariantEval(GATKJobTask):
         retval += [" -R {}".format(self.ref)]
         return retval
 
+class VariantAnnotator(GATKJobTask):
+    _config_subsection = "VariantAnnotator"
+    sub_executable = "VariantAnnotator"
+    options = luigi.Parameter(default=("",), is_list=True)
+    dbsnp = luigi.Parameter(default=None)
+    parent_task = luigi.Parameter(default="ratatosk.lib.tools.gatk.InputVcfFile")
+    source_suffix = luigi.Parameter(default=".vcf")
+    target_suffix = luigi.Parameter(default=".txt")
+    snpeff = luigi.Parameter(default=None)
+    label = luigi.Parameter(default="-gatkann")
+
+    annotations = ["BaseQualityRankSumTest", "DepthOfCoverage", "FisherStrand",
+                   "GCContent", "HaplotypeScore", "HomopolymerRun",
+                   "MappingQualityRankSumTest", "MappingQualityZero",
+                   "QualByDepth", "ReadPosRankSumTest", "RMSMappingQuality"]
+
+    def opts(self):
+        retval = list(self.options)
+        if self.target_region:
+            retval += ["-L {}".format(self.target_region)]
+        return retval
+    
+    def args(self):
+        retval = ["--variant", self.input(), "--out", self.output()]
+        if not self.ref:
+            raise Exception("need reference for VariantAnnotator")
+        retval += [" -R {}".format(self.ref)]
+        for x in self.annotations:
+            retval += ["-A", x]
+        return retval
+
+# NB: GATK requires snpEff version 2.0.5, nothing else. Therefore, it
+# would be convenient to "lock" this version for this task, meaning
+# ratatosk.lib.annotation.snpeff.snpEff must be version 2.0.5
+class VariantSnpEffAnnotator(VariantAnnotator):
+    _config_subsection = "VariantSnpEffAnnotator"
+    label = luigi.Parameter(default="-annotated")
+
+    def requires(self):
+        cls = self.set_parent_task()
+        source = self._make_source_file_name()
+        return [cls(target=source), 
+                # Once again, this shows the necessity of multiple
+                # parent_tasks. Here, we have to use the default value
+                # for snpEff label.
+                ratatosk.lib.annotation.snpeff.snpEff(target=rreplace(source, "{}".format(self.source_suffix), "{}{}".format(ratatosk.lib.annotation.snpeff.snpEff.label.default, self.source_suffix), 1))]
+
+    def args(self):
+        retval = ["--variant", self.input()[0], "--out", self.output(), "--snpEffFile", self.input()[1]]
+        if not self.ref:
+            raise Exception("need reference for VariantAnnotator")
+        retval += [" -R {}".format(self.ref)]
+        retval += ["-A", "SnpEff"]
+        return retval
+
         
 class UnifiedGenotyper(GATKIndexedJobTask):
     _config_subsection = "UnifiedGenotyper"
@@ -293,9 +347,11 @@ class UnifiedGenotyper(GATKIndexedJobTask):
     target_suffix = luigi.Parameter(default=".vcf")
     dbsnp = luigi.Parameter(default=None)
     #label = luigi.Parameter(default=".RAW")?
+    can_multi_thread = True
 
     def opts(self):
         retval = list(self.options)
+        retval += ["-nt {}".format(self.num_threads)]
         if self.target_region:
             retval += ["-L {}".format(self.target_region)]
         if self.dbsnp:
