@@ -30,7 +30,8 @@ logging.basicConfig(level=logging.DEBUG)
 
 # Check for central planner
 local_scheduler = '--local-scheduler'
-process = os.popen("ps x -o pid,args | grep ratatoskd | grep -v grep").read() #sometimes have to use grep -v grep
+# sometimes have to use grep -v grep
+process = os.popen("ps x -o pid,args | grep ratatoskd | grep -v grep").read() 
 
 if process:
     local_scheduler = None
