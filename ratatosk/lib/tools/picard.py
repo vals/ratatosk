@@ -18,6 +18,7 @@ import time
 import glob
 import ratatosk.lib.files.external
 from ratatosk.utils import rreplace
+from ratatosk.config import get_config
 from ratatosk.job import InputJobTask, JobWrapperTask, JobTask, DefaultShellJobRunner
 from ratatosk.handler import RatatoskHandler, register, register_task_handler
 from ratatosk import backend
@@ -44,13 +45,12 @@ class InputBamFile(JobTask):
     _config_section = "picard"
     _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
-    def requires(self):
-        cls = self.set_parent_task()
-        return cls(target=self.target)
-    def output(self):
-        return luigi.LocalTarget(self.target)
-    def run(self):
-        pass
+
+class InputFastaFile(InputJobTask):
+    _config_section = "picard"
+    _config_subsection = "InputFastaFile"
+    parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastaFile")
+    target_suffix = luigi.Parameter(default=".fa")
 
 class PicardJobTask(JobTask):
     _config_section = "picard"
@@ -84,6 +84,16 @@ class PicardJobTask(JobTask):
         source = self._make_source_file_name()
         return cls(target=source)
 
+class CreateSequenceDictionary(PicardJobTask):
+    _config_subsection = "CreateSequenceDictionary"
+    executable = "CreateSequenceDictionary.jar"
+    source_suffix = luigi.Parameter(default=".fa")
+    target_suffix = luigi.Parameter(default=".dict")
+    parent_task = luigi.Parameter(default="ratatosk.lib.tools.picard.InputFastaFile")
+
+    def args(self):
+        return ["REFERENCE=", self.input(), "OUTPUT=", self.output()]
+
 class SortSam(PicardJobTask):
     _config_subsection = "SortSam"
     executable = "SortSam.jar"
@@ -108,13 +118,14 @@ class MergeSamFiles(PicardJobTask):
     def requires(self):
         cls = self.set_parent_task()
         sources = []
-        if self.target_generator_handler and "target_generator_handler" not in self.__handlers__.keys():
+        cnf = get_config()
+        if self.target_generator_handler and "target_generator_handler" not in self._handlers.keys():
             tgf = RatatoskHandler(label="target_generator_handler", mod=self.target_generator_handler)
             register_task_handler(self, tgf)
-        if not "target_generator_handler" in self.__handlers__.keys():
+        if not "target_generator_handler" in self._handlers.keys():
             logging.warn("MergeSamFiles requires a target generator hanler; no defaults are as of yet implemented")
             return []
-        sources = self.__handlers__["target_generator_handler"](self)
+        sources = self._handlers["target_generator_handler"](self)
         return [cls(target=src) for src in sources]    
     
 class AlignmentMetrics(PicardJobTask):

@@ -20,7 +20,7 @@ import subprocess
 import logging
 import warnings
 import luigi
-import importlib
+from subprocess import Popen, PIPE
 from itertools import izip
 from luigi.task import flatten
 import ratatosk.shell as shell
@@ -87,12 +87,14 @@ class DefaultShellJobRunner(JobRunner):
         # Need to call self.__class__ since fix_paths overridden in
         # DefaultGzShellJobRunner
         (tmp_files, job_args) = self.__class__._fix_paths(job)
-        
-        arglist += job_args
+        if not job.pipe:
+            arglist += job_args
         return (arglist, tmp_files)
         
     def run_job(self, job):
         (arglist, tmp_files) = self._make_arglist(job)
+        if job.pipe:
+            return (arglist, tmp_files)
         cmd = ' '.join(arglist)
         logger.info("\nJob runner '{0}';\n\trunning command '{1}'\n".format(self.__class__, cmd))
         (stdout, stderr, returncode) = shell.exec_cmd(cmd, shell=True)
@@ -147,7 +149,48 @@ class DefaultGzShellJobRunner(DefaultShellJobRunner):
                 args.append(str(x))
         return (tmp_files, args)
 
+class PipedJobRunner(DefaultShellJobRunner):
+    @staticmethod
+    def _strip_output(job):
+        tmp_files = []
+        args = []
+        for x in job.args():
+            if isinstance(x, luigi.LocalTarget): # input/output
+                if x.exists(): # input
+                    args.append(x.path)
+                else: # output
+                    pass
+            else:
+                # Strip out any options that have to do with outputs.
+                # Should be defined in task
+                if str(x) not in ["-o", ">", "OUTPUT=", "O="]:
+                    args.append(str(x))
+        return (tmp_files, args)
+        
+    def run_job(self, job):
+        cmdlist = []
+        tmp_files = []
+        for j in job.args():
+            arglist = j.job_runner()._make_arglist(j)[0] + self._strip_output(j)[1]
+            cmdlist.append(arglist)
 
+        plist = []
+        # This is extremely annoying. The bwa -r "@RG\tID:foo" etc
+        # screws up the regular call to Popen, forcing me to use
+        # shell=True. Some escape character that needs correcting;
+        # throws error [bwa_sai2sam_pe] malformated @RG line
+        plist.append(Popen(" ".join(cmdlist[0]), stdout=PIPE, shell=True))
+        #plist.append(Popen(cmdlist[0], stdout=PIPE))
+        for i in xrange(1, len(cmdlist)):
+            #plist.append(Popen(cmdlist[i], stdin=plist[i-1].stdout, stdout=PIPE))
+            plist.append(Popen(" ".join(cmdlist[1]), stdin=plist[i-1].stdout, stdout=PIPE, shell=True))
+            plist[i-1].stdout.close()
+        pipe = Popen("cat > {}".format(job.target), stdin=plist[-1].stdout, shell=True)
+        out, err = pipe.communicate()
+
+##############################
+# Job tasks
+##############################
 class BaseJobTask(luigi.Task):
     config_file = luigi.Parameter(is_global=True, default=os.path.join(os.path.join(ratatosk.__path__[0], os.pardir, "config", "ratatosk.yaml")), description="Main configuration file.")
     custom_config = luigi.Parameter(is_global=True, default=None, description="Custom configuration file for tuning options in predefined pipelines in which workflow may not be altered.")
@@ -157,6 +200,7 @@ class BaseJobTask(luigi.Task):
     options = luigi.Parameter(default=(), description="Program options", is_list=True)
     parent_task = luigi.Parameter(default=None, description="Main parent task from which the current task receives (parts) of its input")
     num_threads = luigi.Parameter(default=1)
+    pipe  = luigi.BooleanParameter(default=False, description="Piped input/output. In practice refrains from including input/output file names in command list.")
     # Note: output should generate one file only; in special cases we
     # need to do hacks
     target = luigi.Parameter(default=None, description="Output target name")
@@ -182,11 +226,12 @@ class BaseJobTask(luigi.Task):
     label = luigi.Parameter(default=None)
 
     # Handlers attached to a task
-    __handlers__ = {}
+    _handlers = {}
 
     def __init__(self, *args, **kwargs):
         params = self.get_params()
         param_values = self.get_param_values(params, args, kwargs)
+        self._handlers = {}
         # Main configuration file
         for key, value in param_values:
             if key == "config_file":
@@ -456,16 +501,21 @@ class BaseJobTask(luigi.Task):
         if isinstance(self.target_suffix, tuple):
             if self.target_suffix[0] and not self.source_suffix is None:
                 source = rreplace(source, self.target_suffix[0], self.source_suffix, 1)
+                #source = [rreplace(source_ref, x, self.source_suffix, 1) for x in self.target_suffix]
         else:
             if self.target_suffix and not self.source_suffix is None:
                 source = rreplace(source, self.target_suffix, self.source_suffix, 1)
         if not self.label:
             return source
-        if source.count(self.label) > 1:
-            logger.warn("label '{}' found multiple times in target '{}'; this could be intentional".format(self.label, source))
-        elif source.count(self.label) == 0:
-            logger.warn("label '{}' not found in target '{}'; are you sure your target is correctly formatted?".format(self.label, source))
-        return rreplace(source, self.label, "", 1)
+        if isinstance(source, list):
+            source = [rreplace(x, self.label, "", 1) for x in source]
+        else:
+            if source.count(self.label) > 1:
+                logger.warn("label '{}' found multiple times in target '{}'; this could be intentional".format(self.label, source))
+            elif source.count(self.label) == 0:
+                logger.warn("label '{}' not found in target '{}'; are you sure your target is correctly formatted?".format(self.label, source))
+            source = rreplace(source, self.label, "", 1)
+        return source
             
 class JobTask(BaseJobTask):
     def job_runner(self):
@@ -493,7 +543,7 @@ class JobWrapperTask(JobTask):
     def run(self):
         pass
 
-class GenericWrapper(JobWrapperTask):
+class GenericWrapperTask(JobWrapperTask):
     """Generic task wrapper"""
     generic_wrapper_target = luigi.Parameter(default=(), is_list=True)
     task = luigi.Parameter(default=None)
@@ -507,31 +557,30 @@ class GenericWrapper(JobWrapperTask):
             cls = Register.get_reg()[self.task]
             return [cls(target=x) for x in self.generic_wrapper_target]
 
+class InputPath(InputJobTask):
+    parent_task = luigi.Parameter(default="ratatosk.lib.files.external.Path")
+
+class PipedTask(JobTask):
+    tasks = luigi.Parameter(default=[], is_list=True)
+
+    def requires(self):
+        return InputPath(target=os.curdir)
+    
+    def output(self):
+        return luigi.LocalTarget(self.target)
+
+    def job_runner(self):
+        return PipedJobRunner()
+
+    def args(self):
+        return self.tasks
+
 class PipelineTask(JobWrapperTask):
     """Wrapper task for predefined pipelines. Adds option
-    target_generator_function which must be defined in order to
+    target_generator_handler which must be defined in order to
     collect targets.
     """
-    target_generator_function = luigi.Parameter(default=None)
-
-    def set_target_generator_function(self):
-        """Try to import a module task class represented as string in
-        target_generator_function and use it as such.
-
-        """
-        opt_mod = ".".join(self.target_generator_function.split(".")[0:-1])
-        opt_fn = self.target_generator_function.split(".")[-1]
-        if not self.target_generator_function:
-            return None
-        try:
-            m = __import__(opt_mod, fromlist=[opt_fn])
-            fn = getattr(sys.modules[m.__name__], opt_fn)
-            return fn
-        except:
-            logger.warn("No function '{}' found: need to define a generator function for task '{}'".format(".".join([opt_mod, opt_fn]), 
-                                                                                                           self.__class__))
-            return None
-    
+    target_generator_handler = luigi.Parameter(default=None)
     
 class PrintConfig(JobTask):
     """Print global configuration for all tasks, including all

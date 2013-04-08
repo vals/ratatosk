@@ -10,8 +10,9 @@ import ratatosk.lib.align.bwa
 import ratatosk.lib.tools.gatk
 import ratatosk.lib.tools.samtools
 import ratatosk.lib.tools.picard
-from ratatosk.pipeline.haloplex import HaloPlex
-from ratatosk.pipeline.align import AlignSeqcap
+from ratatosk.pipeline.haloplex import HaloPlex, HaloPlexSummary
+from ratatosk.pipeline.seqcap import SeqCap, SeqCapSummary
+from ratatosk.pipeline.align import Align, AlignSummary
 from ratatosk.pipeline import config_dict
 
 if __name__ == "__main__":
@@ -34,5 +35,5 @@ if __name__ == "__main__":
         luigi.run(task_args, main_task_cls=task_cls)
     else:
         # Whatever other task/config the user wants to run
-        luigi.run(args)
+        luigi.run()
     

@@ -32,30 +32,31 @@ class InputVcfFile(InputJobTask):
 class HtslibVcfJobTask(JobTask):
     _config_section = "htslib"
     executable = luigi.Parameter(default="vcf")
-    parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.TabixTabixJobTask")
+    parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.Tabix")
 
     def job_runner(self):
         return HtslibJobRunner()
 
-class HtslibVcfMergeJobTask(HtslibVcfJobTask):
-    _config_subsection = "vcfmerge"
+class VcfMerge(HtslibVcfJobTask):
+    _config_subsection = "VcfMerge"
     sub_executable = luigi.Parameter(default="merge")
     target_generator_handler = luigi.Parameter(default=None)
     label = luigi.Parameter(default=".vcfmerge")
-    
+    target_suffix = luigi.Parameter(default=".vcf")
+    source_suffix = luigi.Parameter(default=".vcf.gz")
+
     def args(self):
-        return [x for x in self.input()]
+        return [x for x in self.input()] + [">", self.output()]
     
     def requires(self):
         cls = self.set_parent_task()
         sources = []
-        if self.target_generator_handler and "target_generator_handler" not in self.__handlers__.keys():
+        if self.target_generator_handler and "target_generator_handler" not in self._handlers.keys():
             tgf = RatatoskHandler(label="target_generator_handler", mod=self.target_generator_handler)
             register_task_handler(self, tgf)
-        if not "target_generator_handler" in self.__handlers__.keys():
+        if not "target_generator_handler" in self._handlers.keys():
             logging.warn("vcf merge requires a target generator handler; no defaults are as of yet implemented")
             return []
-        sources = self.__handlers__["target_generator_handler"](self)
-        print sources
+        sources = self._handlers["target_generator_handler"](self)
         return [cls(target=src) for src in sources]
 

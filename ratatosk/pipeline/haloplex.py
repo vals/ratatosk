@@ -17,13 +17,15 @@ import glob
 import csv
 import logging
 import ratatosk
+from ratatosk import backend
 from ratatosk.job import PipelineTask, JobTask, JobWrapperTask, PrintConfig
 from ratatosk.utils import rreplace, fullclassname, make_fastq_links
 from ratatosk.lib.align.bwa import BwaSampe, BwaAln
-from ratatosk.lib.tools.gatk import VariantEval, UnifiedGenotyper, RealignerTargetCreator, IndelRealigner
+from ratatosk.lib.tools.gatk import VariantEval, UnifiedGenotyper, RealignerTargetCreator, IndelRealigner, VariantFiltration
 from ratatosk.lib.tools.picard import PicardMetrics, MergeSamFiles
 from ratatosk.lib.tools.fastqc import FastQCJobTask
-from ratatosk.lib.variation.htslib import HtslibVcfMergeJobTask
+from ratatosk.lib.variation.htslib import VcfMerge
+from ratatosk.lib.variation.tabix import Bgzip
 
 logger = logging.getLogger('luigi-interface')
 
@@ -91,7 +93,14 @@ class RawIndelRealigner(IndelRealigner):
         retval.append(" -R {}".format(self.ref))
         return retval
 
-class HaloPlex(PipelineTask):
+class VariantHaloFiltration(VariantFiltration):
+    """Settings for filtering haloplex variant calls"""
+    _config_subsection = "VariantHaloFiltration"
+    # Options from Halo
+    options = luigi.Parameter(default=('--clusterWindowSize 10 --clusterSize 3 --filterExpression "MQ0 >= 4 && ((MQ0 / (1.0 * DP)) > 0.1)" --filterName "HARD_TO_VALIDATE" --filterExpression "DP < 10" --filterName "LowCoverage" --filterExpression "QUAL < 30.0" --filterName "VeryLowQual" --filterExpression "QUAL > 30.0 && QUAL < 50.0" --filterName "LowQual" --filterExpression "QD < 1.5" --filterName "LowQD"',), is_list=True)
+
+
+class HaloPipeline(PipelineTask):
     _config_section = "pipeline"
     _config_subsection = "HaloPlex"
     # Weird: after subclassing job.PipelineTask, not having a default
@@ -103,25 +112,36 @@ class HaloPlex(PipelineTask):
     lane = luigi.Parameter(default=[], description="Lanes to process.", is_list=True)
     # Hard-code this for now - would like to calculate on the fly so that
     # implicit naming is unnecessary
-    final_target_suffix = "trimmed.sync.sort.merge.realign.recal.clip.filtered.eval_metrics"
+    final_target_suffix = "trimmed.sync.sort.merge.realign.recal.clip.filtered.eval_metrics"    
+    targets = []
 
-    def requires(self):
+    def _setup(self):
         # List requirements for completion, consisting of classes above
         if self.indir is None:
             logger.error("Need input directory to run")
-            return []
+            self.targets = []
         if self.outdir is None:
             self.outdir = self.indir
-        targets = [tgt for tgt in self.target_iterator()]
+        self.targets = [tgt for tgt in self.target_iterator()]
         if self.outdir != self.indir:
-            targets = make_fastq_links(targets, self.indir, self.outdir)
-                    
-        # Hardcode read suffixes here for now
-        # TODO: this is also a local modification so should be moved out of here. 
-        reads = ["{}_R1_001.fastq.gz".format(x[2]) for x in targets] +  ["{}_R2_001.fastq.gz".format(x[2]) for x in targets]
-        variant_targets = ["{}.{}".format(x[1], self.final_target_suffix) for x in targets]
-        picard_metrics_targets = ["{}.{}".format(x[1], "trimmed.sync.sort.merge") for x in targets]
-        vcf_targets = ["{}.{}".format(x[1], self.final_target_suffix.replace(".eval_metrics", ".vcf")) for x in targets]
-        return [VariantEval(target=tgt) for tgt in variant_targets] + [PicardMetrics(target=tgt2) for tgt2 in picard_metrics_targets] + [PrintConfig()] + [FastQCJobTask(target=tgt) for tgt in reads] + [HtslibVcfMergeJobTask(target=os.path.join(self.indir, "all.vcfmerge.vcf.gz"), source_suffix=".{}".format(self.final_target_suffix.replace(".eval_metrics", ".vcf.gz")))]
+            self.targets = make_fastq_links(self.targets, self.indir, self.outdir)
+        # Finally register targets in backend
+        backend.__global_vars__["targets"] = self.targets
 
+class HaloPlex(HaloPipeline):
+    def requires(self):
+        self._setup()
+        fastqc_targets = ["{}_R1_001_fastqc".format(x[2]) for x in self.targets] +  ["{}_R2_001_fastqc".format(x[2]) for x in self.targets]
+        variant_targets = ["{}.{}".format(x[1], self.final_target_suffix) for x in self.targets]
+        picard_metrics_targets = ["{}.{}".format(x[1], "trimmed.sync.sort.merge") for x in self.targets]
 
+        return [VariantEval(target=tgt) for tgt in variant_targets] + [PicardMetrics(target=tgt2) for tgt2 in picard_metrics_targets] + [PrintConfig()] + [FastQCJobTask(target=tgt) for tgt in fastqc_targets]
+
+class HaloBgzip(Bgzip):
+    _config_subsection = "HaloBgzip"
+    parent_task = luigi.Parameter(default="ratatosk.lib.variation.htslib.VcfMerge")
+
+class HaloPlexSummary(HaloPipeline):
+    def requires(self):
+        self._setup()
+        return [HaloBgzip(target=os.path.join(self.outdir, "all.vcfmerge.vcf.gz"))]
