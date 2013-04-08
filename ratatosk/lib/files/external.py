@@ -16,13 +16,13 @@
 External tasks. The outputs of these tasks have
 been created by some external process and therefore
 have no run method.
-
 """
 import os
 import luigi
 import logging
 
 logger = logging.getLogger('luigi-interface')
+
 
 class BamFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
@@ -31,7 +31,31 @@ class BamFile(luigi.ExternalTask):
     def output(self):
         if not self.target:
             return None
+
         return luigi.LocalTarget(os.path.abspath(self.target))
+
+
+class FastqFile(luigi.ExternalTask):
+    target = luigi.Parameter(default=None)
+    label = luigi.Parameter(default=None)
+
+    def output(self):
+        if not self.target:
+            return None
+
+        return luigi.LocalTarget(os.path.abspath(self.target))
+
+
+class FastaFile(luigi.ExternalTask):
+    target = luigi.Parameter(default=None)
+    label = luigi.Parameter(default=None)
+
+    def output(self):
+        if not self.target:
+            return None
+
+        return luigi.LocalTarget(os.path.abspath(self.target))
+
 
 class SamFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
@@ -41,26 +65,10 @@ class SamFile(luigi.ExternalTask):
         logger.debug("Got target '{}' in {}".format(self.target, self.__class__))
         if not self.target:
             return None
+
         return luigi.LocalTarget(os.path.abspath(self.target))
+
     
-class FastqFile(luigi.ExternalTask):
-    target = luigi.Parameter(default=None)
-    label = luigi.Parameter(default=None)
-
-    def output(self):
-        if not self.target:
-            return None
-        return luigi.LocalTarget(os.path.abspath(self.target))
-
-class FastaFile(luigi.ExternalTask):
-    target = luigi.Parameter(default=None)
-    label = luigi.Parameter(default=None)
-
-    def output(self):
-        if not self.target:
-            return None
-        return luigi.LocalTarget(os.path.abspath(self.target))
-
 class VcfFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default=None)
@@ -68,7 +76,9 @@ class VcfFile(luigi.ExternalTask):
     def output(self):
         if not self.target:
             return None
+
         return luigi.LocalTarget(os.path.abspath(self.target))
+
 
 class TxtFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
@@ -77,7 +87,9 @@ class TxtFile(luigi.ExternalTask):
     def output(self):
         if not self.target:
             return None
+
         return luigi.LocalTarget(os.path.abspath(self.target))
+
 
 class Path(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
@@ -86,4 +98,16 @@ class Path(luigi.ExternalTask):
     def output(self):
         if not self.target:
             return None
+
+        return luigi.LocalTarget(os.path.abspath(self.target))
+
+
+class XlsFile(luigi.ExternalTask):
+    target = luigi.Parameter(default=None)
+    label = luigi.Parameter(default=None)
+
+    def output(self):
+        if not self.target:
+            return None
+
         return luigi.LocalTarget(os.path.abspath(self.target))
