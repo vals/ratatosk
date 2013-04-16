@@ -149,6 +149,7 @@ class RealignerTargetCreator(GATKIndexedJobTask):
         retval += ["-R", self.ref]
         return retval
 
+
 class IndelRealigner(GATKIndexedJobTask):
     sub_executable = "IndelRealigner"
     known = luigi.Parameter(default=(), is_list=True)
@@ -174,6 +175,7 @@ class IndelRealigner(GATKIndexedJobTask):
         retval += ["-R", self.ref]
         return retval
 
+
 class BaseRecalibrator(GATKIndexedJobTask):
     sub_executable = "BaseRecalibrator"
     knownSites = luigi.Parameter(default=(), is_list=True)
@@ -195,6 +197,7 @@ class BaseRecalibrator(GATKIndexedJobTask):
         retval += [" ".join([" -knownSites {}".format(x) for x in self.knownSites])]
         return retval
 
+
 class PrintReads(GATKJobTask):
     sub_executable = "PrintReads"
     parent_task = luigi.Parameter(default=('ratatosk.lib.tools.gatk.InputBamFile',
@@ -211,6 +214,7 @@ class PrintReads(GATKJobTask):
         retval += ["-R", self.ref]
         return retval
 
+
 class ClipReads(GATKJobTask):
     sub_executable = "ClipReads"
     # Tailored for HaloPlex
@@ -224,6 +228,7 @@ class ClipReads(GATKJobTask):
             raise Exception("need reference for ClipReads")
         retval += ["-R", self.ref]
         return retval
+
 
 class VariantEval(GATKJobTask):
     sub_executable = "VariantEval"
@@ -242,13 +247,14 @@ class VariantEval(GATKJobTask):
         if self.target_region:
             retval += ["-L", self.target_region]
         return retval
-    
+
     def args(self):
         retval = ["--eval", self.input()[0], "-o", self.output()]
         if not self.ref:
             raise Exception("need reference for VariantEval")
         retval += ["-R", self.ref]
         return retval
+
 
 class VariantAnnotator(GATKJobTask):
     sub_executable = "VariantAnnotator"

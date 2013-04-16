@@ -138,6 +138,7 @@ class Sampe(BwaJobTask):
         (fastq1, fastq2) = [luigi.LocalTarget(rreplace(sai.path, cls().suffix, parent_cls().sfx(), 1)) for sai in self.input()]
         return ["-r", self._get_read_group(), self.bwaref, self.input()[0].path, self.input()[1].path, fastq1, fastq2, ">", self.output()]
 
+
 class Bampe(PipedTask):
     add_label = luigi.Parameter(default=("_R1_001", "_R2_001"), is_list=True)
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.Aln", "ratatosk.lib.align.bwa.Aln"), is_list=True)
@@ -145,15 +146,16 @@ class Bampe(PipedTask):
     read_group = luigi.Parameter(default=None)
     platform = luigi.Parameter(default="Illumina")
     can_multi_thread = False
-    max_memory_gb = 6 # bwa documentation says ~5.4 for human genome
+    max_memory_gb = 6  # bwa documentation says ~5.4 for human genome
 
     def args(self):
         return [Sampe(target=self.target.replace(".bam", ".sam"), pipe=True), SamToBam(target=self.target, pipe=True)]
+
 
 class Index(BwaJobTask):
     sub_executable = "index"
     suffix = luigi.Parameter(default=".fa.bwt")
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.InputFastaFile", ), is_list=True)
-    
+
     def args(self):
         return [self.input()[0]]

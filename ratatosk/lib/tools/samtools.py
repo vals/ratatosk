@@ -18,7 +18,6 @@ Provide wrappers for  `samtools <http://samtools.sourceforge.net/>`_
 Classes
 -------
 """
-import os
 import luigi
 import logging
 import ratatosk.lib.files.external
@@ -28,19 +27,25 @@ from ratatosk.jobrunner import DefaultShellJobRunner
 
 logger = logging.getLogger('luigi-interface')
 
+
 class SamtoolsJobRunner(DefaultShellJobRunner):
     pass
 
+
 class InputSamFile(InputJobTask):
-    """Wrapper task that serves as entry point for samtools tasks that take sam file as input"""
+    """Wrapper task that serves as entry point for samtools tasks that take sam file as input
+    """
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.SamFile")
     suffix = luigi.Parameter(default=".sam")
 
+
 class InputBamFile(InputJobTask):
-    """Wrapper task that serves as entry point for samtools tasks that take bam file as input"""
+    """Wrapper task that serves as entry point for samtools tasks that take bam file as input
+    """
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
     suffix = luigi.Parameter(default=".bam")
-    
+
+
 class SamtoolsJobTask(JobTask):
     """Main samtools job task"""
     executable = luigi.Parameter(default="samtools")
@@ -49,6 +54,27 @@ class SamtoolsJobTask(JobTask):
 
     def job_runner(self):
         return SamtoolsJobRunner()
+
+
+class Mpileup(SamtoolsJobTask):
+    sub_executable = "mpileup"
+    options = luigi.Parameter(default=("-u",), is_list=True)
+    parent_task = luigi.Parameter(default=("ratatosk.lib.tools.samtools.InputBamFile", ), is_list=True)
+    suffix = luigi.Parameter(default=".bcf")
+
+    def args(self):
+        nargs = len(self.input())
+        if nargs == 1:
+            retval = [self.input()[0]]
+        elif nargs == 2:
+            # Second input should be (optional) reference file
+            retval = ["-f", self.input()[1], self.input()[0]]
+        elif nargs == 3:
+            # Third input should be (optional) positions BED
+            retval = ["-l", self.input()[2], "-f", self.input()[1], self.input()[0]]
+
+        return retval
+
 
 class SamToBam(SamtoolsJobTask):
     sub_executable = "view"
@@ -61,6 +87,7 @@ class SamToBam(SamtoolsJobTask):
         if self.pipe:
             return retval + ["-"]
         return retval
+
 
 class SortBam(SamtoolsJobTask):
     sub_executable = "sort"
@@ -77,6 +104,7 @@ class SortBam(SamtoolsJobTask):
         output_prefix = luigi.LocalTarget(rreplace(self.output().path, self.suffix, "", 1))
         return [self.input()[0], output_prefix]
 
+
 class Index(SamtoolsJobTask):
     sub_executable = "index"
     suffix = luigi.Parameter(default=".bai")
@@ -86,7 +114,7 @@ class Index(SamtoolsJobTask):
         return [self.input()[0], self.output()]
 
 # "Connection" tasks
-# import ratatosk.lib.align.bwa 
+# import ratatosk.lib.align.bwa
 # class SampeToSamtools(SamToBam):
 #     def requires(self):
 #         source = self._make_source_file_name()
