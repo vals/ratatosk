@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `mutect <http://www.broadinstitute.org/cancer/cga/mutect>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
@@ -42,13 +50,10 @@ class MutectJobRunner(DefaultShellJobRunner):
 
 
 class InputBamFile(InputJobTask):
-    _config_section = "mutect"
-    _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
     target_suffix = luigi.Parameter(default=".bam")
 
 class MutectJobTask(JobTask):
-    _config_section = "mutect"
     exe_path = luigi.Parameter(default=os.getenv("MUTECT_HOME") if os.getenv("MUTECT_HOME") else os.curdir)
     executable = luigi.Parameter(default="muTect.jar")
     source_suffix = luigi.Parameter(default=".bam")

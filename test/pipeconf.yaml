@@ -1,20 +1,21 @@
 # section parameter values either affect the exe application or
 # correspond to global application parameters
-cutadapt:
-  parent_task: ratatosk.lib.files.fastq.FastqFileLink
+ratatosk.lib.utils.cutadapt:
+  Cutadapt:
+    parent_task: ratatosk.lib.files.fastq.FastqFileLink
 
-misc:
+ratatosk.lib.utils.misc:
   ResyncMates:
-    parent_task: ratatosk.lib.utils.cutadapt.CutadaptJobTask
+    parent_task: ratatosk.lib.utils.cutadapt.Cutadapt
 
-bwa:
+ratatosk.lib.align.bwa:
   bwaref: data/chr11.fa
 
-fastq:
-  link:
+ratatosk.lib.files.fastq:
+  FastqFileLink:
     indir: indir
 
-gatk:
+ratatosk.lib.tools.gatk:
   knownSites: 
     - knownSites1.vcf
     - knownSites2.vcf
@@ -23,11 +24,16 @@ gatk:
   RealignerTargetCreator:
     parent_task: ratatosk.lib.tools.picard.MergeSamFiles
   IndelRealigner:
-    parent_task: ratatosk.lib.tools.picard.MergeSamFiles
+    parent_task:
+    - ratatosk.lib.tools.picard.MergeSamFiles
+    - ratatosk.lib.tools.gatk.RealignerTargetCreator
+    - ratatosk.lib.tools.gatk.UnifiedGenotyper
   BaseRecalibrator:
     parent_task: ratatosk.lib.tools.gatk.IndelRealigner
   PrintReads:
-    parent_task: ratatosk.lib.tools.gatk.BaseRecalibrator
+    parent_task:
+      - ratatosk.lib.tools.gatk.IndelRealigner
+      - ratatosk.lib.tools.gatk.BaseRecalibrator
   ClipReads:
     parent_task: ratatosk.lib.tools.gatk.PrintReads
   UnifiedGenotyper:
@@ -37,7 +43,7 @@ gatk:
   VariantEval:
     parent_task: ratatosk.lib.tools.gatk.VariantFiltration
 
-picard:
+ratatosk.lib.tools.picard:
   InputBamFile:
     parent_task: ratatosk.lib.tools.samtools.SamToBam
   SortSam:
@@ -55,10 +61,10 @@ picard:
   MergeSamFiles:
     parent_task: ratatosk.lib.tools.picard.SortSam
 
-samtools:
+ratatosk.lib.tools.samtools:
   SamToBam:
-    parent_task: ratatosk.lib.align.bwa.BwaSampe
+    parent_task: ratatosk.lib.align.bwa.Sampe
 
-snpeff:
+ratatosk.lib.annotation.snpeff:
   InputVcfFile:
     parent_task: ratatosk.lib.tools.gatk.UnifiedGenotyper

@@ -11,6 +11,22 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+The align pipeline implements an alignment pipeline that aligns reads,
+merges samples and generates picard quality statistics.
+
+Calling via ratatosk_run.py
+----------------------------
+
+.. code-block:: text
+
+   ratatosk_run.py Align --indir inputdir --custom-config custom_config_file.yaml
+   ratatosk_run.py AlignSummary --indir inputdir --custom-config custom_config_file.yaml
+
+
+Classes
+-------
+"""
 import luigi
 import os
 import glob
@@ -18,7 +34,7 @@ import logging
 from ratatosk import backend
 from ratatosk.job import PipelineTask, JobTask, JobWrapperTask
 from ratatosk.lib.tools.picard import PicardMetrics, SortSam
-from ratatosk.lib.tools.fastqc import FastQCJobTask
+from ratatosk.lib.tools.fastqc import FastQC
 from ratatosk.lib.files.fastq import FastqFileLink
 from ratatosk.utils import make_fastq_links
 
@@ -52,9 +68,8 @@ class AlignPipeline(PipelineTask):
 class Align(AlignPipeline):
     def requires(self):
         self._setup()
-        fastqc_targets = ["{}_R1_001_fastqc".format(x[2]) for x in self.targets] +  ["{}_R2_001_fastqc".format(x[2]) for x in self.targets]
         picard_metrics_targets = ["{}.{}".format(x[1], "sort.merge.dup") for x in self.targets]
-        return [PicardMetrics(target=tgt) for tgt in picard_metrics_targets]  + [FastQCJobTask(target=tgt) for tgt in fastqc_targets]
+        return [PicardMetrics(target=tgt) for tgt in picard_metrics_targets] 
 
 
 class AlignSummary(AlignPipeline):

@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for tasks related to fastq files.
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
@@ -20,8 +28,6 @@ from ratatosk.job import JobTask
 logger = logging.getLogger('luigi-interface')
 
 class FastqFileLink(JobTask):
-    _config_section = "fastq"
-    _config_subsection = "link"
     outdir = luigi.Parameter(default=os.curdir)
     # This is tricky: it is easy enough to make links based on
     # absolute file names. The problem is that the information about
@@ -30,10 +36,11 @@ class FastqFileLink(JobTask):
     # know where the link came from; hence, we need an indir parameter
     # for downstream tasks.
     indir = luigi.Parameter(default=os.curdir)
-    parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastqFile")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.files.external.FastqFile", ), is_list=True)
+    suffix = luigi.Parameter(default=("",), is_list=True)
 
     def requires(self):
-        cls = self.set_parent_task()
+        cls = self.parent()[0]
         return cls(target=os.path.join(self.indir, os.path.basename(self.target)))
 
     def output(self):
