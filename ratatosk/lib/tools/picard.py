@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `picard <http://picard.sourceforge.net/>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
@@ -18,13 +26,17 @@ import time
 import glob
 import ratatosk.lib.files.external
 from ratatosk.utils import rreplace
-from ratatosk.job import InputJobTask, JobWrapperTask, JobTask, DefaultShellJobRunner
+from ratatosk.config import get_config
+from ratatosk.job import InputJobTask, JobWrapperTask, JobTask
+from ratatosk.jobrunner import DefaultShellJobRunner
+from ratatosk.handler import RatatoskHandler, register, register_task_handler
+from ratatosk import backend
 import ratatosk.shell as shell
 
 logger = logging.getLogger('luigi-interface')
 
 class PicardJobRunner(DefaultShellJobRunner):
-    def run_job(self, job):
+    def _make_arglist(self, job):
         if not job.jar() or not os.path.exists(os.path.join(job.path(),job.jar())):
             logger.error("Can't find jar: {0}, full path {1}".format(job.jar(),
                                                                      os.path.abspath(job.jar())))
@@ -35,41 +47,24 @@ class PicardJobRunner(DefaultShellJobRunner):
         if job.opts():
             arglist += job.opts()
         (tmp_files, job_args) = DefaultShellJobRunner._fix_paths(job)
-
         arglist += job_args
-        cmd = ' '.join(arglist)        
-        logger.info("\nJob runner '{0}';\n\trunning command '{1}'".format(self.__class__, cmd.replace("= ", "=")))
-        (stdout, stderr, returncode) = shell.exec_cmd(cmd.replace("= ", "="), shell=True)
-
-        if returncode == 0:
-            logger.info("Shell job completed")
-            for a, b in tmp_files:
-                logger.info("renaming {0} to {1}".format(a.path, b.path))
-                a.move(os.path.join(os.curdir, b.path))
-        else:
-            raise Exception("Job '{}' failed: \n{}".format(cmd.replace("= ", "="), " ".join([stderr])))
+        return (arglist, tmp_files)
 
 class InputBamFile(JobTask):
-    _config_section = "picard"
-    _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
-    def requires(self):
-        cls = self.set_parent_task()
-        return cls(target=self.target)
-    def output(self):
-        return luigi.LocalTarget(self.target)
-    def run(self):
-        pass
+    suffix = luigi.Parameter(default=".bam")
+
+class InputFastaFile(InputJobTask):
+    parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastaFile")
+    suffix = luigi.Parameter(default=".fa")
 
 class PicardJobTask(JobTask):
-    _config_section = "picard"
     java_exe = "java"
     java_options = luigi.Parameter(default=("-Xmx2g",), is_list=True)
     exe_path = luigi.Parameter(default=os.getenv("PICARD_HOME") if os.getenv("PICARD_HOME") else os.curdir)
     executable = luigi.Parameter(default=None)
-    parent_task = luigi.Parameter(default="ratatosk.lib.tools.picard.InputBamFile")
-    target_suffix = luigi.Parameter(default=".bam")
-    source_suffix = luigi.Parameter(default=".bam")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.tools.picard.InputBamFile", ), is_list=True)
+    suffix = luigi.Parameter(default=".bam")
     ref = luigi.Parameter(default=None)
 
     def jar(self):
@@ -88,26 +83,27 @@ class PicardJobTask(JobTask):
     def java(self):
         return self.java_exe
 
-    def requires(self):
-        cls = self.set_parent_task()
-        source = self._make_source_file_name()
-        return cls(target=source)
+class CreateSequenceDictionary(PicardJobTask):
+    executable = "CreateSequenceDictionary.jar"
+    suffix = luigi.Parameter(default=".dict")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.tools.picard.InputFastaFile", ), is_list=True)
+
+    def args(self):
+        return ["REFERENCE=", self.input()[0], "OUTPUT=", self.output()]
 
 class SortSam(PicardJobTask):
-    _config_subsection = "SortSam"
     executable = "SortSam.jar"
     options = luigi.Parameter(default=("SO=coordinate MAX_RECORDS_IN_RAM=750000",), is_list=True)
     label = luigi.Parameter(default=".sort")
 
     def args(self):
-        return ["INPUT=", self.input(), "OUTPUT=", self.output()]
+        return ["INPUT=", self.input()[0], "OUTPUT=", self.output()]
 
 class MergeSamFiles(PicardJobTask):
-    _config_subsection = "MergeSamFiles"
     executable = "MergeSamFiles.jar"
     label = luigi.Parameter(default=".merge")
     read1_suffix = luigi.Parameter(default="_R1_001")
-    target_generator_function = luigi.Parameter(default=None)
+    target_generator_handler = luigi.Parameter(default=None)
     # FIXME: TMP_DIR should not be hard-coded
     options = luigi.Parameter(default=("SO=coordinate TMP_DIR=./tmp",), is_list=True)
 
@@ -115,18 +111,21 @@ class MergeSamFiles(PicardJobTask):
         return ["OUTPUT=", self.output()] + [item for sublist in [["INPUT=", x] for x in self.input()] for item in sublist]
 
     def requires(self):
-        cls = self.set_parent_task()
-        tgt_fun = self.set_target_generator_function()
-        if tgt_fun:
-            sources = tgt_fun(self)
-            return [cls(target=src) for src in sources]    
-        else:
+        cls = self.parent()[0]
+        sources = []
+        cnf = get_config()
+        if self.target_generator_handler and "target_generator_handler" not in self._handlers.keys():
+            tgf = RatatoskHandler(label="target_generator_handler", mod=self.target_generator_handler)
+            register_task_handler(self, tgf)
+        if not "target_generator_handler" in self._handlers.keys():
+            logging.warn("MergeSamFiles requires a target generator handler; no defaults are as of yet implemented")
             return []
+        sources = self._handlers["target_generator_handler"](self)
+        return [cls(target=src) for src in sources]    
     
 class AlignmentMetrics(PicardJobTask):
-    _config_subsection = "AlignmentMetrics"
     executable = "CollectAlignmentSummaryMetrics.jar"
-    target_suffix = luigi.Parameter(default=".align_metrics")
+    suffix = luigi.Parameter(default=".align_metrics")
 
     def opts(self):
         retval = list(self.options)
@@ -135,12 +134,11 @@ class AlignmentMetrics(PicardJobTask):
         return retval
 
     def args(self):
-        return ["INPUT=", self.input(), "OUTPUT=", self.output()]
+        return ["INPUT=", self.input()[0], "OUTPUT=", self.output()]
 
 class InsertMetrics(PicardJobTask):
-    _config_subsection = "InsertMetrics"
     executable = "CollectInsertSizeMetrics.jar"
-    target_suffix = luigi.Parameter(default=(".insert_metrics", ".insert_hist"), is_list=True)
+    suffix = luigi.Parameter(default=(".insert_metrics", ".insert_hist"), is_list=True)
 
     def opts(self):
         retval = list(self.options)
@@ -150,25 +148,24 @@ class InsertMetrics(PicardJobTask):
     
     def output(self):
         return [luigi.LocalTarget(self.target),
-                luigi.LocalTarget(rreplace(self.target, self.target_suffix[0], self.target_suffix[1], 1))]
+                luigi.LocalTarget(rreplace(self.target, self.suffix[0], self.suffix[1], 1))]
+
     def args(self):
-        return ["INPUT=", self.input(), "OUTPUT=", self.output()[0], "HISTOGRAM_FILE=", self.output()[1]]
+        return ["INPUT=", self.input()[0], "OUTPUT=", self.output()[0], "HISTOGRAM_FILE=", self.output()[1]]
 
 class DuplicationMetrics(PicardJobTask):
-    _config_subsection = "DuplicationMetrics"
     executable = "MarkDuplicates.jar"
     label = luigi.Parameter(default=".dup")
-    target_suffix = luigi.Parameter(default=(".bam", ".dup_metrics"), is_list=True)
+    suffix = luigi.Parameter(default=(".bam", ".dup_metrics"), is_list=True)
 
     def args(self):
-        return ["INPUT=", self.input(), "OUTPUT=", self.output(), "METRICS_FILE=", rreplace(self.output().fn, "{}{}".format(self.label, self.target_suffix[0]), self.target_suffix[1], 1)]
+        return ["INPUT=", self.input()[0], "OUTPUT=", self.output(), "METRICS_FILE=", rreplace(self.output().path, "{}{}".format(self.label, self.suffix[0]), self.suffix[1], 1)]
 
 class HsMetrics(PicardJobTask):
-    _config_subsection = "HsMetrics"
     executable = "CalculateHsMetrics.jar"
     bait_regions = luigi.Parameter(default=None)
     target_regions = luigi.Parameter(default=None)
-    target_suffix = luigi.Parameter(default=".hs_metrics")
+    suffix = luigi.Parameter(default=".hs_metrics")
     
     def opts(self):
         retval = list(self.options)
@@ -179,25 +176,24 @@ class HsMetrics(PicardJobTask):
     def args(self):
         if not self.bait_regions or not self.target_regions:
             raise Exception("need bait and target regions to run CalculateHsMetrics")
-        return ["INPUT=", self.input(), "OUTPUT=", self.output(), "BAIT_INTERVALS=", os.path.expanduser(self.bait_regions), "TARGET_INTERVALS=", os.path.expanduser(self.target_regions)]
+        return ["INPUT=", self.input()[0], "OUTPUT=", self.output(), "BAIT_INTERVALS=", os.path.expanduser(self.bait_regions), "TARGET_INTERVALS=", os.path.expanduser(self.target_regions)]
 
 class HsMetricsNonDup(HsMetrics):
     """Run on non-deduplicated data"""
-    _config_subsection = "HsMetricsNonDup"
-    parent_task = luigi.Parameter(default="ratatosk.lib.tools.picard.MergeSamFiles")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.tools.picard.MergeSamFiles", ), is_list=True)
 
 class PicardMetrics(JobWrapperTask):
+    suffix = luigi.Parameter(default=("", ), is_list=True)
     def requires(self):
-        return [InsertMetrics(target=self.target + str(InsertMetrics.target_suffix.default[0])),
-                #DuplicationMetrics(target=self.target + str(DuplicationMetrics.label.default) + str(DuplicationMetrics.target_suffix.default[0])),
-                HsMetrics(target=self.target + str(HsMetrics.target_suffix.default)),
-                AlignmentMetrics(target=self.target + str(AlignmentMetrics.target_suffix.default))]
+        return [InsertMetrics(target=self.target + str(InsertMetrics().sfx())),
+                HsMetrics(target=self.target + str(HsMetrics().sfx())),
+                AlignmentMetrics(target=self.target + str(AlignmentMetrics().sfx()))]
 
 class PicardMetricsNonDup(JobWrapperTask):
     """Runs hs metrics on both duplicated and de-duplicated data"""
     def requires(self):
-        return [InsertMetrics(target=self.target + str(InsertMetrics.target_suffix.default[0])),
-                HsMetrics(target=self.target + str(HsMetrics.target_suffix.default)),
-                HsMetricsNonDup(target=rreplace(self.target, str(DuplicationMetrics.label.default), "", 1) + str(HsMetrics.target_suffix.default)),
-                AlignmentMetrics(target=self.target + str(AlignmentMetrics.target_suffix.default))]
+        return [InsertMetrics(target=self.target + str(InsertMetrics().suffix)),
+                HsMetrics(target=self.target + str(HsMetrics().suffix)),
+                HsMetricsNonDup(target=rreplace(self.target, str(DuplicationMetrics().label), "", 1) + str(HsMetrics().suffix)),
+                AlignmentMetrics(target=self.target + str(AlignmentMetrics().suffix))]
 

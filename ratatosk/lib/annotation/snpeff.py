@@ -11,18 +11,27 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `snpeff <http://snpeff.sourceforge.net/>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
 import ratatosk.lib.files.external
 from ratatosk.utils import rreplace, fullclassname
-from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner
+from ratatosk.job import InputJobTask, JobTask, JobWrapperTask
+from ratatosk.jobrunner import  DefaultShellJobRunner
 import ratatosk.shell as shell
 
 logger = logging.getLogger('luigi-interface')
 
 class snpEffJobRunner(DefaultShellJobRunner):
-    def run_job(self, job):
+    def _make_arglist(self, job):
         if not job.jar() or not os.path.exists(os.path.join(job.path(),job.jar())):
             logger.error("Can't find jar: {0}, full path {1}".format(job.jar(),
                                                                      os.path.abspath(job.jar())))
@@ -33,7 +42,12 @@ class snpEffJobRunner(DefaultShellJobRunner):
         if job.opts():
             arglist += job.opts()
         (tmp_files, job_args) = DefaultShellJobRunner._fix_paths(job)
-        arglist += job_args
+        if not job.pipe:
+            arglist += job_args
+        return (arglist , tmp_files)
+
+    def run_job(self, job):
+        (arglist, tmp_files) = self._make_arglist(job)
         cmd = ' '.join(arglist)        
         logger.info("\nJob runner '{0}';\n\trunning command '{1}'".format(self.__class__, cmd))
         (stdout, stderr, returncode) = shell.exec_cmd(cmd, shell=True)
@@ -43,25 +57,23 @@ class snpEffJobRunner(DefaultShellJobRunner):
                 logger.info("renaming {0} to {1}".format(a.path, b.path))
                 # TODO : this should be relpath?
                 a.move(os.path.join(os.curdir, b.path))
-                # Some GATK programs generate bai or idx files on the fly...
-                if os.path.exists(a.path + ".bai"):
-                    logger.info("Saw {} file".format(a.path + ".bai"))
-                    os.rename(a.path + ".bai", b.path.replace(".bam", ".bai"))
-                if os.path.exists(a.path + ".idx"):
-                    logger.info("Saw {} file".format(a.path + ".idx"))
-                    os.rename(a.path + ".idx", b.path + ".idx")
+                # Some jar programs generate bai or idx files on the fly...
+                # FIX ME: is this really needed for snpEff?!?
+                # if os.path.exists(a.path + ".bai"):
+                #     logger.info("Saw {} file".format(a.path + ".bai"))
+                #     os.rename(a.path + ".bai", b.path.replace(".bam", ".bai"))
+                # if os.path.exists(a.path + ".idx"):
+                #     logger.info("Saw {} file".format(a.path + ".idx"))
+                #     os.rename(a.path + ".idx", b.path + ".idx")
         else:
             raise Exception("Job '{}' failed: \n{}".format(cmd, " ".join([stderr])))
 
 
 class InputVcfFile(InputJobTask):
-    _config_section = "snpeff"
-    _config_subsection = "InputVcfFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.VcfFile")
-    target_suffix = luigi.Parameter(default=".vcf")
+    suffix = luigi.Parameter(default=(".vcf", ), is_list=True)
 
 class snpEffJobTask(JobTask):
-    _config_section = "snpeff"
     _snpeff_default_home = os.getenv("SNPEFF_HOME") if os.getenv("SNPEFF_HOME") else os.curdir
     exe_path = luigi.Parameter(default=_snpeff_default_home)
     executable = luigi.Parameter(default="snpEff.jar")
@@ -94,19 +106,34 @@ class snpEffDownload(snpEffJobTask):
     pass
     
 class snpEff(snpEffJobTask):
-    _config_subsection = "eff"
     sub_executable = "eff"
     label = luigi.Parameter(default="-effects")
     options = luigi.Parameter(default=("-1",))
     parent_task = luigi.Parameter(default="ratatosk.lib.annotation.snpeff.InputVcfFile")
+    suffix = luigi.Parameter(default=(".vcf", ), is_list=True)
+
+    def output(self):
+        print self.target
+        return luigi.LocalTarget(self.target)
         
     def args(self):
-        print dir(self)
-        retval = ["-i", self.source_suffix.strip("."),
-                  "-o", self.target_suffix.strip("."),
+        pcls = self.parent()[0]
+        retval = ["-i", pcls().sfx().strip("."),
+                  "-o", self.sfx().strip("."),
                   "-c", self.snpeff_config,
                   self.genome,
-                  self.input(),
+                  self.input()[0],
                   ">", self.output()
                   ]
         return retval
+
+# FIX ME: what does the wrapper return? 
+class snpEffWrapper(JobWrapperTask):
+    parent_task = luigi.Parameter(default=("ratatosk.lib.annotation.snpeff.InputVcfFile", ), is_list=True)
+    suffix = luigi.Parameter(default="")
+    label = luigi.Parameter(default="-effects")
+
+    def requires(self):
+        return [snpEff(target=self.target + ".txt", suffix=(".txt",)), snpEff(target=self.target + ".vcf", suffix=(".vcf",))]
+
+

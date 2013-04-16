@@ -11,12 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
-"""ratatosk.lib.files.external
+"""
 
 External tasks. The outputs of these tasks have
 been created by some external process and therefore
 have no run method.
 
+Classes
+-------
 """
 import os
 import luigi
@@ -27,6 +29,7 @@ logger = logging.getLogger('luigi-interface')
 class BamFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".bam")
 
     def output(self):
         if not self.target:
@@ -36,6 +39,7 @@ class BamFile(luigi.ExternalTask):
 class SamFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default="")
+    suffix = luigi.Parameter(default=".sam")
 
     def output(self):
         logger.debug("Got target '{}' in {}".format(self.target, self.__class__))
@@ -46,6 +50,17 @@ class SamFile(luigi.ExternalTask):
 class FastqFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".fastq.gz")
+
+    def output(self):
+        if not self.target:
+            return None
+        return luigi.LocalTarget(os.path.abspath(self.target))
+
+class FastaFile(luigi.ExternalTask):
+    target = luigi.Parameter(default=None)
+    label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".fa")
 
     def output(self):
         if not self.target:
@@ -55,6 +70,7 @@ class FastqFile(luigi.ExternalTask):
 class VcfFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".vcf")
 
     def output(self):
         if not self.target:
@@ -64,6 +80,7 @@ class VcfFile(luigi.ExternalTask):
 class TxtFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".txt")
 
     def output(self):
         if not self.target:

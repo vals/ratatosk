@@ -11,12 +11,21 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `annovar <http://www.openbioinformatics.org/annovar/>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
 import ratatosk.lib.files.external
 from ratatosk.utils import rreplace, fullclassname
-from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner
+from ratatosk.job import InputJobTask, JobTask
+from ratatosk.jobrunner import DefaultShellJobRunner
 import subprocess
 
 logger = logging.getLogger('luigi-interface')
@@ -25,24 +34,17 @@ class AnnovarJobRunner(DefaultShellJobRunner):
     pass
 
 class InputVcfFile(InputJobTask):
-    _config_section = "annovar"
-    _config_subsection = "InputVcfFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.VcfFile")
-    target_suffix = luigi.Parameter(default=".vcf")
+    suffix = luigi.Parameter(default=(".vcf", ), is_list=True)
 
 class InputTxtFile(InputJobTask):
-    _config_section = "annovar"
-    _config_subsection = "InputTxtFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.TxtFile")
-    target_suffix = luigi.Parameter(default=".txt")
+    suffix = luigi.Parameter(default=(".txt", ), is_list=True)
 
 class InputPath(InputJobTask):
-    _config_section = "annovar"
-    _config_subsection = "InputPath"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.Path")
 
 class AnnovarJobTask(JobTask):
-    _config_section = "annovar"
     exe_path = luigi.Parameter(default=os.getenv("ANNOVAR_HOME") if os.getenv("ANNOVAR_HOME") else os.curdir)
     genome = luigi.Parameter(default="hg19")
     dbsnp = luigi.Parameter(default=130)
@@ -58,7 +60,6 @@ class AnnovarJobTask(JobTask):
         return AnnovarJobRunner()
     
 class AnnovarDownDb(AnnovarJobTask):
-    _config_subsection = "downdb"
     sub_executable = luigi.Parameter(default="annotate_variation.pl")
     dbdest = luigi.Parameter(default="humandb/", description="Database destination directory.")
     dbpath = luigi.Parameter(default=None, description="Database root path. Defaults to annovar path.")
@@ -108,27 +109,23 @@ class AnnovarDownDb(AnnovarJobTask):
         return retval
 
 class Convert2Annovar(AnnovarJobTask):
-    _config_subsection = "convert2annovar"
     sub_executable = luigi.Parameter(default="convert2annovar.pl")
     label = luigi.Parameter(default="-avinput")
-    target_suffix = luigi.Parameter(default=".txt")
-    source_suffix = luigi.Parameter(default=".vcf")
+    suffix = luigi.Parameter(default=".txt")
     # Should be coupled to source_suffix somehow
     options = luigi.Parameter(default=("-format vcf4", ))
-    parent_task = luigi.Parameter(default="ratatosk.lib.annotation.annovar.InputVcfFile")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.annotation.annovar.InputVcfFile", ), is_list=True)
 
     def args(self):
-        return [self.input(), "--outfile", self.output()]
+        return [self.input()[0], "--outfile", self.output()]
 
 class SummarizeAnnovar(AnnovarJobTask):
-    _config_subsection = "summarize_annovar"
     sub_executable = luigi.Parameter(default="summarize_annovar.pl")
     # This variable would be used with AnnovarDownDb requirement
     db_requires = luigi.Parameter(default=("refGene", "genomicSuperDups", "snp", "avsift", "ljb_all", "esp5400_all",
                                            "phastConsElements46way", "ALL.sites.2011_05"), is_list=True)
-    parent_task = luigi.Parameter(default="ratatosk.lib.annotation.annovar.Convert2Annovar")
-    target_suffix = luigi.Parameter(default=".log")
-    source_suffix = luigi.Parameter(default="")
+    parent_task = luigi.Parameter(default=("ratatosk.lib.annotation.annovar.Convert2Annovar", ), is_list=True)
+    suffix = luigi.Parameter(default=".txt.log")
     buildver = luigi.Parameter(default="hg19")
     verdbsnp = luigi.Parameter(default="132")
     ver1000g = luigi.Parameter(default="1000g2011may")
@@ -143,8 +140,8 @@ class SummarizeAnnovar(AnnovarJobTask):
         return retval
 
     def requires(self):
-        cls = self.set_parent_task()
-        source = self._make_source_file_name()
+        cls = self.parent()[0]
+        source = self.source()[0]
         return [cls(target=source)] + [AnnovarDownDb(downdb=x, verdbsnp=self.verdbsnp) for x in self.db_requires]
 
     def args(self):

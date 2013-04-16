@@ -1,0 +1,70 @@
+# section parameter values either affect the exe application or
+# correspond to global application parameters
+ratatosk.lib.utils.cutadapt:
+  Cutadapt:
+    parent_task: ratatosk.lib.files.fastq.FastqFileLink
+
+ratatosk.lib.utils.misc:
+  ResyncMates:
+    parent_task: ratatosk.lib.utils.cutadapt.Cutadapt
+
+ratatosk.lib.align.bwa:
+  bwaref: data/chr11.fa
+
+ratatosk.lib.files.fastq:
+  FastqFileLink:
+    indir: indir
+
+ratatosk.lib.tools.gatk:
+  knownSites: 
+    - knownSites1.vcf
+    - knownSites2.vcf
+  ref: data/chr11.fa
+  dbsnp: data/dbsnp132_chr11.vcf
+  RealignerTargetCreator:
+    parent_task: ratatosk.lib.tools.picard.MergeSamFiles
+  IndelRealigner:
+    parent_task:
+    - ratatosk.lib.tools.picard.MergeSamFiles
+    - ratatosk.lib.tools.gatk.RealignerTargetCreator
+    - ratatosk.lib.tools.gatk.UnifiedGenotyper
+  BaseRecalibrator:
+    parent_task: ratatosk.lib.tools.gatk.IndelRealigner
+  PrintReads:
+    parent_task:
+      - ratatosk.lib.tools.gatk.IndelRealigner
+      - ratatosk.lib.tools.gatk.BaseRecalibrator
+  ClipReads:
+    parent_task: ratatosk.lib.tools.gatk.PrintReads
+  UnifiedGenotyper:
+    parent_task: ratatosk.lib.tools.gatk.ClipReads
+  VariantFiltration:
+    parent_task: ratatosk.lib.tools.gatk.UnifiedGenotyper
+  VariantEval:
+    parent_task: ratatosk.lib.tools.gatk.VariantFiltration
+
+ratatosk.lib.tools.picard:
+  InputBamFile:
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
+  SortSam:
+    parent_task: ratatosk.lib.tools.samtools.SamToBam
+  HsMetrics:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+    target_regions: data/chr11_targets.interval_list
+    bait_regions: data/chr11_baits.interval_list
+  DuplicationMetrics:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+  AlignmentMetrics:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+  InsertMetrics:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+  MergeSamFiles:
+    parent_task: ratatosk.lib.tools.picard.SortSam
+
+ratatosk.lib.tools.samtools:
+  SamToBam:
+    parent_task: ratatosk.lib.align.bwa.Sampe
+
+ratatosk.lib.annotation.snpeff:
+  InputVcfFile:
+    parent_task: ratatosk.lib.tools.gatk.UnifiedGenotyper

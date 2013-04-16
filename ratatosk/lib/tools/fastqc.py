@@ -11,10 +11,19 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `fastqc <http://www.bioinformatics.babraham.ac.uk/projects/fastqc/>`_   
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
-from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner
+from ratatosk.job import InputJobTask, JobTask
+from ratatosk.jobrunner import DefaultShellJobRunner
 logger = logging.getLogger('luigi-interface')
 import ratatosk.shell as shell
 
@@ -23,15 +32,20 @@ import ratatosk.shell as shell
 class FastQCJobRunner(DefaultShellJobRunner):
     """This job runner must take into account that there is no default
     output file but rather an output directory"""
-    def run_job(self, job):
+    def _make_arglist(self, job):
         arglist = [job.exe()]
         if job.opts():
             arglist += job.opts()
         (tmp_files, job_args) = DefaultShellJobRunner._fix_paths(job)
         (tmpdir, outdir) = tmp_files[0]
-        arglist += ['-o', tmpdir.fn]
+        arglist += ['-o', tmpdir.path]
         arglist += [job_args[0]]
-        os.makedirs(os.path.join(os.curdir, tmpdir.fn))
+        return (arglist, tmp_files)
+
+    def run_job(self, job):
+        (arglist, tmp_files) = self._make_arglist(job)
+        (tmpdir, outdir) = tmp_files[0]
+        os.makedirs(os.path.join(os.curdir, tmpdir.path))
         # Need to send output to temporary *directory*, not file
         cmd = ' '.join(arglist)        
         logger.info("Job runner '{0}'; running command '{1}'".format(self.__class__, cmd))
@@ -46,29 +60,20 @@ class FastQCJobRunner(DefaultShellJobRunner):
             raise Exception("Job '{}' failed: \n{}".format(cmd.replace("= ", "="), " ".join([stderr])))
 
 class InputBamFile(InputJobTask):
-    _config_section = "fastqc"
-    _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
+    suffix = luigi.Parameter(default=(".bam", ), is_list=True)
 
 class InputFastqFile(InputJobTask):
-    _config_section = "fastqc"
-    _config_subsection = "input_fastq_file"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastqFile")
+    suffix = luigi.Parameter(default=(".fastq.gz", ), is_list=True)
 
-class FastQCJobTask(JobTask):
-    _config_section = "fastqc"
+class FastQC(JobTask):
     executable = luigi.Parameter(default="fastqc")
     parent_task = luigi.Parameter(default = "ratatosk.lib.tools.fastqc.InputFastqFile")
-    # fastqc has many outputs (targets) - arbitrarily use the
-    # "summary.txt" output. Or use the --noextract option?
-    target_file_name = luigi.Parameter(default = "summary.txt")
+    suffix = luigi.Parameter(default="_fastqc")
 
     def job_runner(self):
         return FastQCJobRunner()
 
-    def output(self):
-        outdir = "{}_fastqc".format(os.path.splitext(self.input().fn.replace(".gz", ""))[0])
-        return luigi.LocalTarget(outdir)
-
     def args(self):
-        return [self.input(), self.output()]
+        return [self.input()[0], self.output()]
