@@ -38,6 +38,19 @@ class BamFile(luigi.ExternalTask):
 
         return luigi.LocalTarget(os.path.abspath(self.target))
 
+
+class BcfFile(luigi.ExternalTask):
+    target = luigi.Parameter(default=None)
+    label = luigi.Parameter(default=None)
+    suffix = luigi.Parameter(default=".bcf")
+
+    def output(self):
+        if not self.target:
+            return None
+
+        return luigi.LocalTarget(os.path.abspath(self.target))
+
+
 class SamFile(luigi.ExternalTask):
     target = luigi.Parameter(default=None)
     label = luigi.Parameter(default="")

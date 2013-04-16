@@ -81,6 +81,7 @@ class SamToBam(SamtoolsJobTask):
         retval = [self.input()[0], ">", self.output()]
         if self.pipe:
             return retval + ["-"]
+
         return retval
 
 

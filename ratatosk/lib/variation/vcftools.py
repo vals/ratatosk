@@ -18,7 +18,6 @@ Classes
 -------
 """
 import luigi
-import ratatosk.lib.files.external
 from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner
 
 
