@@ -17,26 +17,24 @@ Provide wrappers for `vcftools <http://vcftools.sourceforge.net/perl_module.html
 Classes
 -------
 """
-
-
-
-import os
 import luigi
-import logging
 import ratatosk.lib.files.external
 from ratatosk.job import InputJobTask, JobTask, DefaultShellJobRunner
 
+
 class VcfJobRunner(DefaultShellJobRunner):
     pass
+
 
 class InputVcfFile(InputJobTask):
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.VcfFile")
     target_suffix = luigi.Parameter(default=".vcf")
 
+
 class VcfJobTask(JobTask):
     def job_runner(self):
         return VcfJobRunner()
 
+
 class Vcf(JobTask):
     pass
-

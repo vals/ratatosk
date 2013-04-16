@@ -62,17 +62,12 @@ class Mpileup(SamtoolsJobTask):
     parent_task = luigi.Parameter(default=("ratatosk.lib.tools.samtools.InputBamFile", ), is_list=True)
     suffix = luigi.Parameter(default=".bcf")
 
-    def args(self):
-        nargs = len(self.input())
-        if nargs == 1:
-            retval = [self.input()[0]]
-        elif nargs == 2:
-            # Second input should be (optional) reference file
-            retval = ["-f", self.input()[1], self.input()[0]]
-        elif nargs == 3:
-            # Third input should be (optional) positions BED
-            retval = ["-l", self.input()[2], "-f", self.input()[1], self.input()[0]]
+    def opts(self):
+        retval = list(self.options)
+        return retval
 
+    def args(self):
+        retval = [self.input()[0]]
         return retval
 
 

@@ -110,7 +110,7 @@ class DefaultShellJobRunner(JobRunner):
                 a.move(os.path.join(os.curdir, b.path))
         else:
             raise Exception("Job '{}' failed: \n{}".format(' '.join(arglist), " ".join([stderr])))
-                
+
 
 # Aaarrgh - it doesn't get uglier than this. Some programs
 # "seamlessly" read and write gzipped files. In the job runner we work
@@ -134,10 +134,10 @@ class DefaultGzShellJobRunner(DefaultShellJobRunner):
         tmp_files = []
         args = []
         for x in job.args():
-            if isinstance(x, luigi.LocalTarget): # input/output
-                if x.exists(): # input
+            if isinstance(x, luigi.LocalTarget):  # input/output
+                if x.exists():  # input
                     args.append(x.path)
-                else: # output
+                else:  # output
                     ypath = x.path + '-luigi-tmp-%09d' % random.randrange(0, 1e10) + '.gz'
                     y = luigi.LocalTarget(ypath)
                     logger.info("Using temp path: {0} for path {1}".format(y.path, x.path))
@@ -150,16 +150,17 @@ class DefaultGzShellJobRunner(DefaultShellJobRunner):
                 args.append(str(x))
         return (tmp_files, args)
 
+
 class PipedJobRunner(DefaultShellJobRunner):
     @staticmethod
     def _strip_output(job):
         tmp_files = []
         args = []
         for x in job.args():
-            if isinstance(x, luigi.LocalTarget): # input/output
-                if x.exists(): # input
+            if isinstance(x, luigi.LocalTarget):  # input/output
+                if x.exists():  # input
                     args.append(x.path)
-                else: # output
+                else:  # output
                     pass
             else:
                 # Strip out any options that have to do with outputs.
@@ -167,7 +168,7 @@ class PipedJobRunner(DefaultShellJobRunner):
                 if str(x) not in ["-o", ">", "OUTPUT=", "O="]:
                     args.append(str(x))
         return (tmp_files, args)
-        
+
     def run_job(self, job):
         cmdlist = []
         tmp_files = []

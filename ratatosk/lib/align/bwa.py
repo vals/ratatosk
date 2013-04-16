@@ -80,7 +80,7 @@ class Aln(BwaJobTask):
         else:
             retval = [cls(target=source)]
         if len(self.parent()) > 1:
-            retval += [cls(target=source) for cls, source in izip(self.parent()[1:], self.source()[1:])]
+            retval += [lcls(target=lsource) for lcls, lsource in izip(self.parent()[1:], self.source()[1:])]
         return retval
 
     def args(self):
@@ -93,10 +93,13 @@ class Aln(BwaJobTask):
         else:
             return [self.bwaref, self.input()[0], ">", self.output()]
 
+
 class BwaAlnWrapperTask(JobWrapperTask):
     fastqfiles = luigi.Parameter(default=[], is_list=True)
+
     def requires(self):
         return [Aln(target=x) for x in self.fastqfiles]
+
 
 class Sampe(BwaJobTask):
     sub_executable = "sampe"
@@ -106,7 +109,7 @@ class Sampe(BwaJobTask):
     platform = luigi.Parameter(default="Illumina")
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.Aln", "ratatosk.lib.align.bwa.Aln"), is_list=True)
     can_multi_thread = False
-    max_memory_gb = 6 # bwa documentation says ~5.4 for human genome
+    max_memory_gb = 6  # bwa documentation says ~5.4 for human genome
 
     def _get_read_group(self):
         if not self.read_group:
