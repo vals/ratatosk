@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `tabix <http://sourceforge.net/projects/samtools/files/tabix/>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
@@ -25,14 +33,11 @@ class TabixJobRunner(DefaultShellJobRunner):
 
 
 class InputVcfFile(InputJobTask):
-    _config_section = "tabix"
-    _config_subsection = "InputVcfFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.VcfFile")
     suffix = luigi.Parameter(default=(".vcf", ), is_list=True)
 
 
 class TabixJobTask(JobTask):
-    _config_section = "tabix"
     executable = ""
 
     def job_runner(self):
@@ -46,7 +51,6 @@ class TabixJobTask(JobTask):
 
 
 class Bgzip(TabixJobTask):
-    _config_subsection = "Bgzip"
     sub_executable = luigi.Parameter(default="bgzip")
     parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.InputVcfFile")
     suffix = luigi.Parameter(default=".vcf.gz")
@@ -57,7 +61,6 @@ class Bgzip(TabixJobTask):
 
 # Since this is such a common operation, add the task here
 class BgUnzip(TabixJobTask):
-    _config_subsection = "BgUnzip"
     sub_executable = luigi.Parameter(default="bgzip")
     parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.Bgzip")
     suffix = luigi.Parameter(default=".vcf")
@@ -73,7 +76,6 @@ class BgUnzip(TabixJobTask):
 
 
 class Tabix(TabixJobTask):
-    _config_subsection = "Tabix"
     sub_executable = luigi.Parameter(default="tabix")
     parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.Bgzip")
     suffix = luigi.Parameter(default=".vcf.gz.tbi")
@@ -83,8 +85,6 @@ class Tabix(TabixJobTask):
     
 
 class IndexedBgzip(JobWrapperTask):
-    _config_section = "tabix"
-    _config_subsection = "IndexedBgzip"
     suffix = luigi.Parameter(default=(".vcf.gz", ".vcf.gz.tbi"), is_list=True)
     parent_task = luigi.Parameter(default="ratatosk.lib.variation.tabix.Bgzip")
 

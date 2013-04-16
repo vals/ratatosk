@@ -11,6 +11,16 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `cutadapt <http://code.google.com/p/cutadapt/>`_ 
+
+Install with `pip install cutadapt`
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import time
@@ -20,7 +30,6 @@ import logging
 from ratatosk.job import InputJobTask, JobTask
 from ratatosk.jobrunner import DefaultShellJobRunner, DefaultGzShellJobRunner
 from ratatosk.utils import rreplace
-from cement.utils import shell
 
 logger = logging.getLogger('luigi-interface')
 
@@ -29,15 +38,11 @@ class CutadaptJobRunner(DefaultGzShellJobRunner):
     pass
 
 class InputFastqFile(InputJobTask):
-    _config_section = "cutadapt"
-    _config_subsection = "InputFastqFile"
     parent_task = luigi.Parameter(default=("ratatosk.lib.files.external.FastqFile", ), is_list=True)
     suffix = luigi.Parameter(default=(".fastq.gz", ), is_list=True)
 
 # NB: cutadapt is a non-hiearchical tool. Group under, say, utils?
-class CutadaptJobTask(JobTask):
-    _config_section = "cutadapt"
-    _config_subsection = "Cutadapt"
+class Cutadapt(JobTask):
     label = luigi.Parameter(default=".trimmed")
     executable = luigi.Parameter(default="cutadapt")
     parent_task = luigi.Parameter(default=("ratatosk.lib.utils.cutadapt.InputFastqFile", ),is_list=True)

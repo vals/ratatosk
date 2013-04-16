@@ -11,34 +11,33 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
-import os
+"""
+Wrapper library for `bwa <http://bio-bwa.sourceforge.net/>`_.
+
+
+Classes
+--------
+"""
 import re
 import luigi
-import time
-import shutil
+from itertools import izip
 from ratatosk.job import InputJobTask, JobTask, JobWrapperTask, DefaultShellJobRunner, PipedTask
 from ratatosk.lib.tools.samtools import SamToBam
 from ratatosk.utils import rreplace, fullclassname
-from cement.utils import shell
 
 class BwaJobRunner(DefaultShellJobRunner):
     pass
 
 class InputFastqFile(InputJobTask):
-    _config_section = "bwa"
-    _config_subsection = "InputFastqFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastqFile")
     suffix = luigi.Parameter(default=".fastq.gz")
 
 class InputFastaFile(InputJobTask):
-    _config_section = "bwa"
-    _config_subsection = "InputFastaFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastaFile")
     suffix = luigi.Parameter(default=".fa")
 
 class BwaJobTask(JobTask):
     """Main bwa class with parameters necessary for all bwa classes"""
-    _config_section = "bwa"
     executable = luigi.Parameter(default="bwa")
     bwaref = luigi.Parameter(default=None)
     num_threads = luigi.Parameter(default=1)
@@ -51,7 +50,6 @@ class BwaJobTask(JobTask):
 
 
 class Aln(BwaJobTask):
-    _config_subsection = "Aln"
     sub_executable = "aln"
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.InputFastqFile",))
     suffix = luigi.Parameter(default=".sai")
@@ -69,7 +67,7 @@ class Aln(BwaJobTask):
         cls = self.parent()[0]
         source = self.source()[0]
         # Ugly hack for 1 -> 2 dependency: works but should be dealt with otherwise
-        if str(fullclassname(cls)) in ["ratatosk.lib.utils.misc.ResyncMatesJobTask"]:
+        if str(fullclassname(cls)) in ["ratatosk.lib.utils.misc.ResyncMates"]:
             if re.search(self.read1_suffix, source):
                 self.is_read1 = True
                 fq1 = source
@@ -78,19 +76,22 @@ class Aln(BwaJobTask):
                 self.is_read1 = False
                 fq1 = rreplace(source, self.read2_suffix, self.read1_suffix, 1)
                 fq2 = source
-            return cls(target=[fq1, fq2])
+            retval = [cls(target=[fq1, fq2])]
         else:
-            return cls(target=source)
+            retval = [cls(target=source)]
+        if len(self.parent()) > 1:
+            retval += [cls(target=source) for cls, source in izip(self.parent()[1:], self.source()[1:])]
+        return retval
 
     def args(self):
         # bwa aln "-f" option seems to be broken!?!
-        if isinstance(self.input(), list):
+        if isinstance(self.input()[0], list):
             if self.is_read1:
-                return [self.bwaref, self.input()[0], ">", self.output()]
+                return [self.bwaref, self.input()[0][0], ">", self.output()]
             else:
-                return [self.bwaref, self.input()[1], ">", self.output()]
+                return [self.bwaref, self.input()[0][1], ">", self.output()]
         else:
-            return [self.bwaref, self.input(), ">", self.output()]
+            return [self.bwaref, self.input()[0], ">", self.output()]
 
 class BwaAlnWrapperTask(JobWrapperTask):
     fastqfiles = luigi.Parameter(default=[], is_list=True)
@@ -98,9 +99,7 @@ class BwaAlnWrapperTask(JobWrapperTask):
         return [Aln(target=x) for x in self.fastqfiles]
 
 class Sampe(BwaJobTask):
-    _config_subsection = "Sampe"
     sub_executable = "sampe"
-    # Get these with static methods
     add_label = luigi.Parameter(default=("_R1_001", "_R2_001"), is_list=True)
     suffix = luigi.Parameter(default=".sam")
     read_group = luigi.Parameter(default=None)
@@ -114,7 +113,7 @@ class Sampe(BwaJobTask):
             from ratatosk import backend
             cls = self.parent()[0]
             sai1 = self.input()[0]
-            rgid = rreplace(rreplace(sai1.path, cls().suffix, "", 1), self.add_label[0], "", 1)
+            rgid = rreplace(rreplace(sai1.path, cls().sfx(), "", 1), self.add_label[0], "", 1)
             smid = rgid
             # Get sample information if present in global vars. Note
             # that this requires the
@@ -140,8 +139,6 @@ class Sampe(BwaJobTask):
         return ["-r", self._get_read_group(), self.bwaref, self.input()[0].path, self.input()[1].path, fastq1, fastq2, ">", self.output()]
 
 class Bampe(PipedTask):
-    _config_section = "bwa"
-    _config_subsection = "Bampe"
     add_label = luigi.Parameter(default=("_R1_001", "_R2_001"), is_list=True)
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.Aln", "ratatosk.lib.align.bwa.Aln"), is_list=True)
     suffix = luigi.Parameter(default=".bam")
@@ -154,7 +151,6 @@ class Bampe(PipedTask):
         return [Sampe(target=self.target.replace(".bam", ".sam"), pipe=True), SamToBam(target=self.target, pipe=True)]
 
 class Index(BwaJobTask):
-    _config_subsection = "index"
     sub_executable = "index"
     suffix = luigi.Parameter(default=".fa.bwt")
     parent_task = luigi.Parameter(default=("ratatosk.lib.align.bwa.InputFastaFile", ), is_list=True)

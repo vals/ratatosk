@@ -11,6 +11,13 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for  `samtools <http://samtools.sourceforge.net/>`_
+
+
+Classes
+-------
+"""
 import os
 import luigi
 import logging
@@ -26,21 +33,16 @@ class SamtoolsJobRunner(DefaultShellJobRunner):
 
 class InputSamFile(InputJobTask):
     """Wrapper task that serves as entry point for samtools tasks that take sam file as input"""
-    _config_section = "samtools"
-    _config_subsection = "InputSamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.SamFile")
     suffix = luigi.Parameter(default=".sam")
 
 class InputBamFile(InputJobTask):
     """Wrapper task that serves as entry point for samtools tasks that take bam file as input"""
-    _config_section = "samtools"
-    _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
     suffix = luigi.Parameter(default=".bam")
     
 class SamtoolsJobTask(JobTask):
     """Main samtools job task"""
-    _config_section = "samtools"
     executable = luigi.Parameter(default="samtools")
     parent_task = luigi.Parameter(default=("ratatosk.lib.tools.samtools.InputSamFile", ), is_list=True)
     suffix = luigi.Parameter(default=".bam")
@@ -49,7 +51,6 @@ class SamtoolsJobTask(JobTask):
         return SamtoolsJobRunner()
 
 class SamToBam(SamtoolsJobTask):
-    _config_subsection = "SamToBam"
     sub_executable = "view"
     options = luigi.Parameter(default=("-bSh",), is_list=True)
     parent_task = luigi.Parameter(default=("ratatosk.lib.tools.samtools.InputSamFile", ), is_list=True)
@@ -62,7 +63,6 @@ class SamToBam(SamtoolsJobTask):
         return retval
 
 class SortBam(SamtoolsJobTask):
-    _config_subsection = "sortbam"
     sub_executable = "sort"
     suffix = luigi.Parameter(default=".bam")
     label = luigi.Parameter(default=".sort")
@@ -78,7 +78,6 @@ class SortBam(SamtoolsJobTask):
         return [self.input()[0], output_prefix]
 
 class Index(SamtoolsJobTask):
-    _config_subsection = "Index"
     sub_executable = "index"
     suffix = luigi.Parameter(default=".bai")
     parent_task = luigi.Parameter(default="ratatosk.lib.tools.samtools.InputBamFile")

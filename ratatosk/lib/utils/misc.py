@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide miscallaneous wrappers.
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import time
@@ -30,14 +38,10 @@ class ResyncMatesJobRunner(DefaultGzShellJobRunner):
         pass
 
 class InputFastqFile(InputJobTask):
-    _config_section = "misc"
-    _config_subsection = "InputFastqFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastqFile")
     suffix = luigi.Parameter(default=".fastq.gz")
 
-class ResyncMatesJobTask(JobTask):
-    _config_section = "misc"
-    _config_subsection = "ResyncMates"
+class ResyncMates(JobTask):
     executable = luigi.Parameter(default="resyncMates.pl")
     label = luigi.Parameter(default=".sync")
     target = luigi.Parameter(default=(), is_list=True)

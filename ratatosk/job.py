@@ -38,6 +38,9 @@ logger = logging.getLogger('luigi-interface')
 # Job tasks
 ##############################
 class BaseJobTask(luigi.Task):
+    """Main job task from which all ratatosk tasks should inherit.
+    
+    """
     config_file = luigi.Parameter(is_global=True, default=os.path.join(os.path.join(ratatosk.__path__[0], os.pardir, "config", "ratatosk.yaml")), description="Main configuration file.")
     custom_config = luigi.Parameter(is_global=True, default=None, description="Custom configuration file for tuning options in predefined pipelines in which workflow may not be altered.")
     dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Generate pipeline graph/flow without running any commands")
@@ -55,6 +58,8 @@ class BaseJobTask(luigi.Task):
     #source_suffix = luigi.Parameter(default=None, description="File suffix for source")
     # Use for changing labels in graph visualization
     use_long_names = luigi.Parameter(default=False, description="Use long names (including all options) in graph vizualization", is_boolean=True, is_global=True)
+    # Use for changing labels in graph visualization
+    use_target_names = luigi.Parameter(default=False, description="Use target names in graph vizualization", is_boolean=True, is_global=True)
 
     # Labels ("tag") for output file name; not all tasks are allowed
     # to "label" their output
@@ -76,12 +81,11 @@ class BaseJobTask(luigi.Task):
     can_multi_thread = False
     max_memory_gb = 3
 
-    # Configuration sections
-    _config_section = None
-    _config_subsection = None
-
     # Handlers attached to a task
     _handlers = {}
+
+    # Configuration, main section
+    _config_section = None
 
     # Parent task classes
     _parent_cls = []
@@ -109,7 +113,6 @@ class BaseJobTask(luigi.Task):
                 custom_config.add_config_path(custom_config_file)
                 kwargs = self._update_config(custom_config, disable_parent_task_update=True, *args, **kwargs)
         super(BaseJobTask, self).__init__(*args, **kwargs)
-
         # Register parent tasks
         parents = [v for k, v in self.get_param_values(params, args, kwargs) if k == "parent_task"].pop()
         # In case parent_task is defined as a string, not a list
@@ -158,16 +161,24 @@ class BaseJobTask(luigi.Task):
         """
         # Update global configuration here for printing everything in PrintConfig task
         backend.__global_config__ = update(backend.__global_config__, vars(config)["_sections"])
+        # Set section to module name and subsection to class name
+        # unless _config_section and _config_subsection set. The
+        # latter are needed for classes that live outside their
+        # namespace, e.g. subclasses in pipelines
+        _section = self.__module__
+        _subsection =  self.__class__.__name__
+        if self._config_section:
+            _section = self._config_section
         if not config:
             return kwargs
-        if not config.has_section(self._config_section):
+        if not config.has_section(_section):
             return kwargs
         params = self.get_params()
         param_values = {x[0]:x[1] for x in self.get_param_values(params, args, kwargs)}
-        if not self._config_subsection:
-            d = {self._config_section:param_values}
+        if not _subsection:
+            d = {_section:param_values}
         else:
-            d = {self._config_section:{self._config_subsection:param_values}}
+            d = {_section:{_subsection:param_values}}
         backend.__global_config__ = update(backend.__global_config__, d)
         for key, value in self.get_params():
             new_value = None
@@ -176,11 +187,11 @@ class BaseJobTask(luigi.Task):
                 new_value = param_values.get(key, None)
                 logger.debug("option '{0}'; got value '{1}' from command line, overriding configuration file setting default '{2}' for task class '{3}'".format(key, new_value, value.default, self.__class__))
             else:
-                if config.has_key(self._config_section, key):
-                    new_value = config.get(self._config_section, key)
-                if config.has_section(self._config_section, self._config_subsection):
-                    if config.has_key(self._config_section, key, self._config_subsection):
-                        new_value = config.get(self._config_section, key, self._config_subsection)
+                if config.has_key(_section, key):
+                    new_value = config.get(_section, key)
+                if config.has_section(_section, _subsection):
+                    if config.has_key(_section, key, _subsection):
+                        new_value = config.get(_section, key, _subsection)
                         logger.debug("Reading config file, setting '{0}' to '{1}' for task class '{2}'".format(key, new_value, self.__class__))
 
             if new_value:
@@ -190,8 +201,8 @@ class BaseJobTask(luigi.Task):
                     kwargs[key] = new_value
                     logger.debug("Updating config, setting '{0}' to '{1}' for task class '{2}'".format(key, new_value, self.__class__))
             else:
+                logger.debug("Using default value '{0}' for '{1}' for task class '{2}'".format(value.default, key, self.__class__))
                 pass
-            logger.debug("Using default value '{0}' for '{1}' for task class '{2}'".format(value.default, key, self.__class__))
         return kwargs
 
     def path(self):
@@ -351,8 +362,6 @@ class BaseJobTask(luigi.Task):
     def source(self):
         """Make source file names from parent tasks in self.parent()"""
         self._target_iter = 0
-        # print "Add Label in source {} for class {}".format(str(self.add_label), self.__class__)
-        # print "Label in source {} for class {}".format(str(self.label), self.__class__)
         if self.diff_label:
             assert len(self.diff_label) == len(self.parent()), "if diff_label is defined, it must have as many elements as parent_task"
             return [self._make_source_file_name(p, diff_label=dl) for p, dl in izip(self.parent(), self.diff_label)]
@@ -376,6 +385,8 @@ class BaseJobTask(luigi.Task):
 
         :param parent_cls: parent class
         :param diff_label: the "difference" in labels between self and parent.  E.g. if self.target=file.merge.sort.recal.bam depends on task with output file.merge.bam, and self.label=.recal, we would need to set the difference (.sort) here.
+        :param add_label: label that should be added to parent source, e.g. read suffix 
+
 
         :return: parent task target name (source)
         """
@@ -451,7 +462,7 @@ class NullJobTask(JobTask):
 class GenericWrapperTask(JobWrapperTask):
     """Generic task wrapper.
 
-    NOTE: Still under development
+    .. note:: Still under development
 
     The idea is to create a dependency to any task, so that the
     calling script effectively works as a make file.
@@ -470,9 +481,16 @@ class GenericWrapperTask(JobWrapperTask):
             return [cls(target=x) for x in self.generic_wrapper_target]
 
 class InputPath(InputJobTask):
+    """Helper task for PipedTask"""
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.Path")
 
 class PipedTask(JobTask):
+    """A piped task takes as input a set of tasks and uses the
+    standard python module subprocess.Popen to communicate output
+    between the tasks.
+
+    """
+
     tasks = luigi.Parameter(default=[], is_list=True)
 
     def requires(self):

@@ -11,6 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Provide wrappers for `picard <http://picard.sourceforge.net/>`_
+
+
+Classes
+-------
+"""
+
 import os
 import luigi
 import logging
@@ -43,19 +51,14 @@ class PicardJobRunner(DefaultShellJobRunner):
         return (arglist, tmp_files)
 
 class InputBamFile(JobTask):
-    _config_section = "picard"
-    _config_subsection = "InputBamFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.BamFile")
     suffix = luigi.Parameter(default=".bam")
 
 class InputFastaFile(InputJobTask):
-    _config_section = "picard"
-    _config_subsection = "InputFastaFile"
     parent_task = luigi.Parameter(default="ratatosk.lib.files.external.FastaFile")
     suffix = luigi.Parameter(default=".fa")
 
 class PicardJobTask(JobTask):
-    _config_section = "picard"
     java_exe = "java"
     java_options = luigi.Parameter(default=("-Xmx2g",), is_list=True)
     exe_path = luigi.Parameter(default=os.getenv("PICARD_HOME") if os.getenv("PICARD_HOME") else os.curdir)
@@ -81,7 +84,6 @@ class PicardJobTask(JobTask):
         return self.java_exe
 
 class CreateSequenceDictionary(PicardJobTask):
-    _config_subsection = "CreateSequenceDictionary"
     executable = "CreateSequenceDictionary.jar"
     suffix = luigi.Parameter(default=".dict")
     parent_task = luigi.Parameter(default=("ratatosk.lib.tools.picard.InputFastaFile", ), is_list=True)
@@ -90,7 +92,6 @@ class CreateSequenceDictionary(PicardJobTask):
         return ["REFERENCE=", self.input()[0], "OUTPUT=", self.output()]
 
 class SortSam(PicardJobTask):
-    _config_subsection = "SortSam"
     executable = "SortSam.jar"
     options = luigi.Parameter(default=("SO=coordinate MAX_RECORDS_IN_RAM=750000",), is_list=True)
     label = luigi.Parameter(default=".sort")
@@ -99,7 +100,6 @@ class SortSam(PicardJobTask):
         return ["INPUT=", self.input()[0], "OUTPUT=", self.output()]
 
 class MergeSamFiles(PicardJobTask):
-    _config_subsection = "MergeSamFiles"
     executable = "MergeSamFiles.jar"
     label = luigi.Parameter(default=".merge")
     read1_suffix = luigi.Parameter(default="_R1_001")
@@ -124,7 +124,6 @@ class MergeSamFiles(PicardJobTask):
         return [cls(target=src) for src in sources]    
     
 class AlignmentMetrics(PicardJobTask):
-    _config_subsection = "AlignmentMetrics"
     executable = "CollectAlignmentSummaryMetrics.jar"
     suffix = luigi.Parameter(default=".align_metrics")
 
@@ -138,7 +137,6 @@ class AlignmentMetrics(PicardJobTask):
         return ["INPUT=", self.input()[0], "OUTPUT=", self.output()]
 
 class InsertMetrics(PicardJobTask):
-    _config_subsection = "InsertMetrics"
     executable = "CollectInsertSizeMetrics.jar"
     suffix = luigi.Parameter(default=(".insert_metrics", ".insert_hist"), is_list=True)
 
@@ -156,7 +154,6 @@ class InsertMetrics(PicardJobTask):
         return ["INPUT=", self.input()[0], "OUTPUT=", self.output()[0], "HISTOGRAM_FILE=", self.output()[1]]
 
 class DuplicationMetrics(PicardJobTask):
-    _config_subsection = "DuplicationMetrics"
     executable = "MarkDuplicates.jar"
     label = luigi.Parameter(default=".dup")
     suffix = luigi.Parameter(default=(".bam", ".dup_metrics"), is_list=True)
@@ -165,7 +162,6 @@ class DuplicationMetrics(PicardJobTask):
         return ["INPUT=", self.input()[0], "OUTPUT=", self.output(), "METRICS_FILE=", rreplace(self.output().path, "{}{}".format(self.label, self.suffix[0]), self.suffix[1], 1)]
 
 class HsMetrics(PicardJobTask):
-    _config_subsection = "HsMetrics"
     executable = "CalculateHsMetrics.jar"
     bait_regions = luigi.Parameter(default=None)
     target_regions = luigi.Parameter(default=None)
@@ -184,15 +180,14 @@ class HsMetrics(PicardJobTask):
 
 class HsMetricsNonDup(HsMetrics):
     """Run on non-deduplicated data"""
-    _config_subsection = "HsMetricsNonDup"
     parent_task = luigi.Parameter(default=("ratatosk.lib.tools.picard.MergeSamFiles", ), is_list=True)
 
 class PicardMetrics(JobWrapperTask):
     suffix = luigi.Parameter(default=("", ), is_list=True)
     def requires(self):
-        return [InsertMetrics(target=self.target + str(InsertMetrics().suffix[0])),
-                HsMetrics(target=self.target + str(HsMetrics().suffix)),
-                AlignmentMetrics(target=self.target + str(AlignmentMetrics().suffix))]
+        return [InsertMetrics(target=self.target + str(InsertMetrics().sfx())),
+                HsMetrics(target=self.target + str(HsMetrics().sfx())),
+                AlignmentMetrics(target=self.target + str(AlignmentMetrics().sfx()))]
 
 class PicardMetricsNonDup(JobWrapperTask):
     """Runs hs metrics on both duplicated and de-duplicated data"""
