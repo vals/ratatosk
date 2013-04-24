@@ -9,7 +9,10 @@ Developer Documentation
    quickstart
    tasks
    configuration
+   targets
    scripts
+   examples
+   troubleshooting
    issues
    ideas
 

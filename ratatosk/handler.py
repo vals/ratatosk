@@ -11,6 +11,10 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations under
 # the License.
+"""
+Functions and classes for registering handlers.
+
+"""
 import sys
 import os
 import logging
@@ -18,9 +22,9 @@ import luigi
 from types import GeneratorType
 from ratatosk import backend
 from ratatosk.utils import fullclassname
+from ratatosk.log import get_logger
 
-# Use luigi-interface for now
-logger = logging.getLogger('luigi-interface')
+logger = get_logger()
 
 class IHandler(object):
     """A handler interface class"""
@@ -31,13 +35,10 @@ class IHandler(object):
     def load_type(self):
         raise NotImplementedError
 
-
 class RatatoskHandler(IHandler):
     """Ratatosk handler class. Ensures we have at least label and mod
-    functions that register uses to place mod in
+    functions that uses register to place mod in
     backend.__handlers__[label].
-
-    FIX ME: add interface attribute?
     """
     _label = None
     _mod = None
@@ -53,14 +54,16 @@ class RatatoskHandler(IHandler):
         setattr(self, "_load_type", load_type)
 
     def label(self):
+        """Handler identifier label"""
         return self._label
 
     def mod(self):
+        """String representation of class/function"""
         return self._mod
 
     def load_type(self):
+        """Load type (class or function)"""
         return self._load_type
-
 
 def _load_module_function(handler_obj):
     """Load a module function represented as a string.
@@ -95,15 +98,17 @@ def _load_module_class(handler_obj):
         ret_cls = cls
         return ret_cls
     except:
-        logger.warn("No class '{}' found: failed to register handler '{}'".format(".".join([opt_mod, opt_fn]), 
+        logger.warn("No class '{}' found: failed to register handler '{}'".format(".".join([opt_mod, opt_cls]), 
                                                                                   handler_obj.label()))
         return None
 
-        # logger.warn("No class {} found: using default class {} for task '{}'".format(".".join([opt_mod, opt_cls]), 
-        #                                                                              ".".join([default_mod, default_cls]),
-        #                                                                              self.__class__))
-
 def _load(handler_obj):
+    """
+    Load an :class:`.IHandler` handler object. The
+    handler_obj.load_type() defines whether
+    :func:`._load_module_function` or :func:`._load_module_class` is
+    to be used.
+    """
     if handler_obj.load_type() == "function":
         return _load_module_function(handler_obj)
     elif handler_obj.load_type() == "class":
@@ -205,7 +210,7 @@ def target_generator_validator(fn):
 def setup_global_handlers(hlist=["target_generator_handler"]):
     """Helper function to setup global handlers defined in 'settings'
     section. 
-    
+
     """
     if not "settings" in backend.__global_config__:
         return
@@ -215,7 +220,6 @@ def setup_global_handlers(hlist=["target_generator_handler"]):
     for key in hlist:
         if key in backend.__global_config__["settings"]:
             logging.info("registering handler {}:{}".format(key, backend.__global_config__["settings"][key]))
-            print "registering handler {}:{}".format(key, backend.__global_config__["settings"][key])
             h = RatatoskHandler(label=key, mod=backend.__global_config__["settings"][key])
             register(h)
 

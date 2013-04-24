@@ -24,14 +24,17 @@ The main pipeline tasks are
 1. HaloPlex
 2. HaloPlexSummary
 
-They should be run in this order.
+Running only HaloPlexSummary should invoke all dependencies in HaloPlex.
+However, for many samples (>20), it is advisable to first run HaloPlex
+with smaller number of samples in batches.
+
 
 Calling via ratatosk_run.py
 ----------------------------
 
 .. code-block:: text
 
-   ratatosk_run.py Halo --indir inputdir --custom-config custom_config_file.yaml
+   ratatosk_run.py HaloPlex --indir inputdir --custom-config custom_config_file.yaml
    ratatosk_run.py HaloPlexSummary --indir inputdir --custom-config custom_config_file.yaml
 
 
@@ -41,14 +44,14 @@ Classes
 
 import luigi
 import os
-import logging
 from ratatosk import backend
 from ratatosk.job import PipelineTask, JobTask, JobWrapperTask, PrintConfig
 from ratatosk.utils import make_fastq_links
 from ratatosk.lib.tools.gatk import VariantEval, UnifiedGenotyper, VariantFiltration
 from ratatosk.lib.variation.tabix import Bgzip
+from ratatosk.log import get_logger
 
-logger = logging.getLogger('luigi-interface')
+logger = get_logger()
 
 class RawUnifiedGenotyper(UnifiedGenotyper):
     """
@@ -103,7 +106,7 @@ class HaloPlex(HaloPipeline):
         self._setup()
         if not self.targets:
             return []
-        variant_targets = ["{}.{}".format(x[1], self.final_target_suffix) for x in self.targets]
+        variant_targets = ["{}.{}".format(x.prefix("sample"), self.final_target_suffix) for x in self.targets]
         return [VariantEval(target=tgt) for tgt in variant_targets]
 
 class HaloBgzip(Bgzip):

@@ -30,9 +30,10 @@ from ratatosk import backend
 from ratatosk.handler import RatatoskHandler, register_attr
 from ratatosk.config import get_config, get_custom_config
 from ratatosk.utils import rreplace, update, config_to_dict
+from ratatosk.log import get_logger
+from ratatosk.experiment import ISample
 
-# Use luigi-interface for now
-logger = logging.getLogger('luigi-interface')
+logger = get_logger()
 
 ##############################
 # Job tasks
@@ -42,67 +43,129 @@ class BaseJobTask(luigi.Task):
     
     """
     config_file = luigi.Parameter(is_global=True, default=os.path.join(os.path.join(ratatosk.__path__[0], os.pardir, "config", "ratatosk.yaml")), description="Main configuration file.")
-    custom_config = luigi.Parameter(is_global=True, default=None, description="Custom configuration file for tuning options in predefined pipelines in which workflow may not be altered.")
-    dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Generate pipeline graph/flow without running any commands")
-    restart = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Restart pipeline from scratch.")
-    restart_from = luigi.Parameter(default=None, is_global=True, description="NOT YET IMPLEMENTED: Restart pipeline from a given task.")
-    options = luigi.Parameter(default=(), description="Program options", is_list=True)
-    parent_task = luigi.Parameter(default=(), description="Main parent task(s) from which the current task receives of its input", is_list=True)
-    num_threads = luigi.Parameter(default=1, description="Number of threads to run. Set to 1 if task.can_multi_thread is false")
-    pipe  = luigi.BooleanParameter(default=False, description="Piped input/output. In practice refrains from including input/output file names in command list.")
-    # Note: output should generate one file only; in special cases we
-    # need to do hacks
-    target = luigi.Parameter(default=None, description="Output target name")
-    suffix = luigi.Parameter(default=(), description="File suffix for target", is_list=True)
-    #target_suffix = luigi.Parameter(default=(), description="File suffix for target", is_list=True)
-    #source_suffix = luigi.Parameter(default=None, description="File suffix for source")
-    # Use for changing labels in graph visualization
-    use_long_names = luigi.Parameter(default=False, description="Use long names (including all options) in graph vizualization", is_boolean=True, is_global=True)
-    # Use for changing labels in graph visualization
-    use_target_names = luigi.Parameter(default=False, description="Use target names in graph vizualization", is_boolean=True, is_global=True)
+    """Main configuration file. For pipeline tasks, a predefined
+    configuration file is loaded, disabling this option. Use
+    :attr:`.custom_config` to configure pipeline tasks."""
 
-    # Labels ("tag") for output file name; not all tasks are allowed
-    # to "label" their output
+    custom_config = luigi.Parameter(is_global=True, default=None, description="Custom configuration file for tuning options in predefined pipelines in which workflow may not be altered.")
+    """Custom configuration file for tuning options in predefined pipelines."""
+
+    dry_run = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Generate pipeline graph/flow without running any commands")
+    """Dry run: don't actually run anything."""
+
+    restart = luigi.Parameter(default=False, is_global=True, is_boolean=True, description="Restart pipeline from scratch.")
+    """NOT YET IMPLEMENTED: Restart from scratch."""
+
+    restart_from = luigi.Parameter(default=None, is_global=True, description="NOT YET IMPLEMENTED: Restart pipeline from a given task.")
+    """NOT YET IMPLEMENTED: restart from a given task."""
+
+    options = luigi.Parameter(default=(), description="Program options", is_list=True)
+    """Program options to pass to task executable"""
+
+    parent_task = luigi.Parameter(default=(), description="Main parent task(s) from which the current task receives of its input", is_list=True)
+    """Parent task(s) on which the task depends."""
+
+    num_threads = luigi.Parameter(default=1, description="Number of threads to run. Set to 1 if task.can_multi_thread is false")
+    """Number of threads to run. Reset to 1 if :attr:`.can_multi_thread` False."""
+
+    pipe  = luigi.BooleanParameter(default=False, description="Piped input/output. In practice refrains from including input/output file names in command list.")
+
+    target = luigi.Parameter(default=None, description="Output target name")
+    """Output target name for this task. Note: output should, as far as possible, be a singleton"""
+
+    suffix = luigi.Parameter(default=(), description="File suffix for target", is_list=True)
+    """File suffix name for target"""
+
+    use_long_names = luigi.Parameter(default=False, description="Use long names (including all options) in graph vizualization", is_boolean=True, is_global=True)
+    """Use all names, including options, in graph visualization. Useful for debugging purposes."""
+
+    use_target_names = luigi.Parameter(default=False, description="Use target names in graph visualization", is_boolean=True, is_global=True)
+    """Use target names in graph visualization."""
+
     label = luigi.Parameter(default=None)
-    # Hack to communicate between tasks between which many labels have
-    # been added. I see no easy way to generate this information
-    # automatically.
+    """Output label for this task. Used to generate target name. For
+    instance, if source=file.txt, label=.label, and suffix=.txt, then
+    target=file.label.txt"""
+
     diff_label = luigi.Parameter(default=None, is_list=True)
-    # Conversely, label to be added to source. For e.g. BwaSampe
+    """NB: TARGETED FOR REMOVAL. Label that is the difference in
+    labels between tasks that are "far apart" in the dependency tree."""
+
     add_label = luigi.Parameter(default=None, is_list=True)
-    # Path to main program; used by job runner
+    """NB: TARGETED FOR REMOVAL. Label to be added to source."""
+
     exe_path = luigi.Parameter(default=None)
-    # Name of executable to run a program
+    """Path to main program; used by job runner"""
+
     executable = None
-    # Name of 'sub_executable' (e.g. for GATK, bwa). 
+    """Name of executable to run a program"""
+
     sub_executable = None
+    """Name of 'sub_executable' (e.g. for GATK, bwa)."""
 
     n_reduce_tasks = 8
+
     can_multi_thread = False
+    """Flag to indicate whether this task can run in multi-threaded mode."""
+
     max_memory_gb = 3
+    """Max memory this process may use. In general, max_memory_gb X
+    workers should be less than the memory of the computing
+    resource."""
 
-    # Handlers attached to a task
     _handlers = {}
+    """Handlers attached to a task"""
 
-    # Configuration, main section
     _config_section = None
+    """Configuration, main section. This is needed to group a task in
+    a given namespace in the configuration file."""
 
-    # Parent task classes
     _parent_cls = []
+    """Parent task classes."""
+
     _target_iter = 0
+    """Counter."""
 
     def __init__(self, *args, **kwargs):
+        """Initializes job task. A job task can be customized via
+        configuration files. There are currently two configuration
+        files:
+
+        1. config_file, passed via option ``--config-file``
+        2. custom_config, passed via option ``--custom-config``
+
+        The reason there being two files is that updating
+        ``parent_task`` is disabled in the custom configuration,
+        thereby ensuring that predefined workflows in the regular
+        configuration cannot be tampered with. However, other options
+        can be modified.
+
+        Options are updated in the by the following order of
+        precedence:
+
+        1. reads the configuration file updating the kwargs
+        2. reads the custom configuration if present, updating relevant kwargs
+        3. checks if any command line options have been passed, and if so, update kwargs
+        4. use the default value
+
+        Once the configuration has been set, the parent tasks are
+        registered via
+        :func:`ratatosk.job.BaseJobTask._register_parent_task`.
+
+        """
         self._parent_cls = []
-        self._handers = {}
+        self._handlers = {}
         params = self.get_params()
         param_values = self.get_param_values(params, args, kwargs)
-        # Main configuration file
+        param_values_dict = {x[0]:x[1] for x in self.get_param_values(params, args, kwargs)}
+        # 1. Main configuration file
         for key, value in param_values:
             if key == "config_file":
                 config_file = value
                 config = get_config()
                 config.add_config_path(config_file)
-                kwargs = self._update_config(config, *args, **kwargs)
+                kwargs = self._update_config(config, param_values_dict, *args, **kwargs)
+        # 2. Custom configuration file
         for key, value in param_values:
             if key == "custom_config":
                 if not value:
@@ -111,8 +174,21 @@ class BaseJobTask(luigi.Task):
                 # This must be a separate instance
                 custom_config = get_custom_config()
                 custom_config.add_config_path(custom_config_file)
-                kwargs = self._update_config(custom_config, disable_parent_task_update=True, *args, **kwargs)
+                kwargs = self._update_config(custom_config, param_values_dict, disable_parent_task_update=True, *args, **kwargs)
+
+        # 3. Finally, check if options were passed via the command line 
+        for key, value in self.get_params():
+            new_value = None
+            # Got a command line option => override config file. Currently overriding parent_task *is* possible here (FIX ME?)
+            if value.default != param_values_dict.get(key, None):
+                new_value = param_values_dict.get(key, None)
+                logger.debug("option '{0}'; got value '{1}' from command line, overriding configuration file setting and default '{2}' for task class '{3}'".format(key, new_value, value.default, self.__class__))
+                kwargs[key] = new_value
         super(BaseJobTask, self).__init__(*args, **kwargs)
+        # TODO: now that all parameters have been collected, global sections should be updated here
+        # Update global configuration here for printing everything in PrintConfig task
+        # backend.__global_config__ = update(backend.__global_config__, vars(config)["_sections"])
+
         # Register parent tasks
         parents = [v for k, v in self.get_param_values(params, args, kwargs) if k == "parent_task"].pop()
         # In case parent_task is defined as a string, not a list
@@ -144,56 +220,53 @@ class BaseJobTask(luigi.Task):
             len_diff = len(parents) - len(default_parents)
             default_parents = list(default_parents) + ["ratatosk.job.NullJobTask" for i in range(0, len_diff)]
         for p,d in izip(parents, default_parents):
-            h = RatatoskHandler(label="_parent_cls", mod=p)
+            h = RatatoskHandler(label="_parent_cls", mod=p, load_type="class")
             register_attr(self, h, default_handler=d)
         
-    def _update_config(self, config, disable_parent_task_update=False, *args, **kwargs):
+    def _update_config(self, config, param_values_dict, disable_parent_task_update=False, *args, **kwargs):
         """Update configuration for this task. All task options should
         have a default. Order of preference:
 
-        1. if command line option encountered, override config file settings
-        2. if configuration file has a setting, override default value for task.
+        
+        1. if command line option encountered, override all config file settings
+        2. if custom config file setting, override config and default
+        3. if config file, override default
+        4. default value
 
         :param config: configuration instance
+        :param param_values_dict: task parameter dict
         :param disable_parent_task_update: disable parent task update for custom configurations (best practice pipeline execution order should stay fixed)
 
         :returns: an updated parameter list for the task.
         """
-        # Update global configuration here for printing everything in PrintConfig task
-        backend.__global_config__ = update(backend.__global_config__, vars(config)["_sections"])
         # Set section to module name and subsection to class name
         # unless _config_section and _config_subsection set. The
         # latter are needed for classes that live outside their
         # namespace, e.g. subclasses in pipelines
         _section = self.__module__
-        _subsection =  self.__class__.__name__
+        try:
+            _subsection =  self.__class__.__name__ 
+        except:
+            _subsection = None
         if self._config_section:
             _section = self._config_section
         if not config:
             return kwargs
         if not config.has_section(_section):
             return kwargs
-        params = self.get_params()
-        param_values = {x[0]:x[1] for x in self.get_param_values(params, args, kwargs)}
         if not _subsection:
-            d = {_section:param_values}
+            d = {_section:param_values_dict}
         else:
-            d = {_section:{_subsection:param_values}}
+            d = {_section:{_subsection:param_values_dict}}
         backend.__global_config__ = update(backend.__global_config__, d)
         for key, value in self.get_params():
             new_value = None
-            # Got a command line option => override config file
-            if value.default != param_values.get(key, None):
-                new_value = param_values.get(key, None)
-                logger.debug("option '{0}'; got value '{1}' from command line, overriding configuration file setting default '{2}' for task class '{3}'".format(key, new_value, value.default, self.__class__))
-            else:
-                if config.has_key(_section, key):
-                    new_value = config.get(_section, key)
-                if config.has_section(_section, _subsection):
-                    if config.has_key(_section, key, _subsection):
-                        new_value = config.get(_section, key, _subsection)
-                        logger.debug("Reading config file, setting '{0}' to '{1}' for task class '{2}'".format(key, new_value, self.__class__))
-
+            if config.has_key(_section, key):
+                new_value = config.get(_section, key)
+            if config.has_section(_section, _subsection):
+                if config.has_key(_section, key, _subsection):
+                    new_value = config.get(_section, key, _subsection)
+                    logger.debug("Reading config file, setting '{0}' to '{1}' for task class '{2}'".format(key, new_value, self.__class__))
             if new_value:
                 if key == "parent_task" and disable_parent_task_update:
                     logger.debug("disable_parent_task_update set; not updating '{0}' for task class '{1}'".format(key, self.__class__))
@@ -206,7 +279,10 @@ class BaseJobTask(luigi.Task):
         return kwargs
 
     def path(self):
-        """Main path of this executable"""
+        """Main path of this executable. 
+
+        :returns: :attr:`.exe_path`
+        """
         return self.exe_path
 
     def exe(self):
@@ -354,10 +430,8 @@ class BaseJobTask(luigi.Task):
         if not target_list:
             return
         for tgt in target_list:
-            if len(tgt) != 3:
-                raise ValueError, "target generator handler must return 3-tuple"
-            sample, sample_merge, sample_run = tgt
-            yield sample, sample_merge, sample_run
+            assert isinstance(tgt, ISample), "Target iterater must return an object of type 'ISample'"
+            yield tgt
 
     def source(self):
         """Make source file names from parent tasks in self.parent()"""
@@ -486,12 +560,12 @@ class InputPath(InputJobTask):
 
 class PipedTask(JobTask):
     """A piped task takes as input a set of tasks and uses the
-    standard python module subprocess.Popen to communicate output
-    between the tasks.
+    standard python module :py:mod:`subprocess.Popen` to communicate
+    output between the tasks.
 
     """
-
     tasks = luigi.Parameter(default=[], is_list=True)
+    """Task list to run."""
 
     # TODO: Is this needed? Better is probably to do a "regular" depends
     # def requires(self):
@@ -512,6 +586,8 @@ class PipelineTask(JobWrapperTask):
     collect targets.
     """
     target_generator_handler = luigi.Parameter(default=None)
+    """Target generator handler is a function that returns a list of
+    :class:`ISample <ratatosk.experiment.ISample>` objects."""
     
 class PrintConfig(JobTask):
     """Print global configuration for all tasks, including all
@@ -548,7 +624,9 @@ class PrintConfig(JobTask):
 
 
 def name_prefix():
-    """Generate a name prefix based on available labels for task
+    """NOT IMPLEMENTED YET
+
+    Generate a name prefix based on available labels for task
     graph. Traverse dependency tree, recording all possible joins of
     labels from end leaf to "top" leaf. Note that this is similar, but
     not identical, to the longest path problem (not all nodes have a
@@ -571,12 +649,9 @@ def name_prefix():
 # does not take arguments. How pass on to generic_target_generator?
 # Something along the lines of the backend or **kwargs
 def generic_target_generator(target_generator_infile=None, **kwargs):
-    """Generic target generator. Should take as input a file name, read and return contents"""
-    if not target_generator_infile:
-        return (None, None, None)
-    else:
-        with open(target_generator_infile) as fh:
-            lines = [x for x in fh.readlines() if not x.startswith("#")]
-        if not len(lines[0], split()):
-            raise ValueError, "target generator input file must consist of 3-tuple (sample, merge-prefix, read-prefix)"
-        return lines
+    """NOT IMPLEMENTED YET.
+
+    Generic target generator. Should take as input a file name, read
+    and return contents.
+    """ 
+    pass
