@@ -21,12 +21,16 @@ Classes
 
 import os
 import luigi
-import logging
-import ratatosk.lib.files.external
-from ratatosk.job import InputJobTask, JobTask, JobWrapperTask
+import ratatosk.lib.files.input
+from ratatosk.job import JobTask, JobWrapperTask
 from ratatosk.jobrunner import DefaultShellJobRunner
 from ratatosk.utils import rreplace, fullclassname
+from ratatosk.log import get_logger
 
+logger = get_logger()
+
+class InputVcfFile(ratatosk.lib.files.input.InputVcfFile):
+    pass
 
 class TabixJobRunner(DefaultShellJobRunner):
     pass
@@ -94,3 +98,4 @@ class IndexedBgzip(JobWrapperTask):
         return [zipcls(target=self.source()[0]), 
                        indexcls(target=rreplace(self.source()[0], zipcls().sfx(), indexcls().sfx(), 1),
                                 parent_task=fullclassname(zipcls))]
+
