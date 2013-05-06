@@ -1,8 +1,5 @@
 # -*- coding: utf-8 -*-
 #
-# ratatosk documentation build configuration file, created by
-# sphinx-quickstart on Fri Apr  5 11:46:36 2013.
-#
 # This file is execfile()d with the current directory set to its containing dir.
 #
 # Note that not all possible configuration values are present in this
@@ -16,7 +13,7 @@ import sys, os
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
-sys.path.insert(0, os.path.abspath('../ratatosk/'))
+# sys.path.insert(0, os.path.abspath('../doc/'))
 
 # -- General configuration -----------------------------------------------------
 
@@ -25,15 +22,9 @@ sys.path.insert(0, os.path.abspath('../ratatosk/'))
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.autodoc',
-              'sphinx.ext.intersphinx', 
-              'sphinx.ext.todo', 
-              'sphinx.ext.coverage', 
-              'sphinx.ext.graphviz', 
-              'sphinx.ext.mathjax', 
-              'sphinx.ext.ifconfig', 
-              'sphinx.ext.viewcode', 
-              'sphinx.ext.extlinks']
+extensions = ['matplotlib.sphinxext.mathmpl',
+              'matplotlib.sphinxext.only_directives',
+              'matplotlib.sphinxext.plot_directive']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
@@ -48,8 +39,8 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = u'ratatosk'
-copyright = u'2013, Per Unneberg'
+project = u'${project_id}'
+copyright = u'2013, ratatosk'
 
 # The version info for the project you're documenting, acts as replacement for
 # |version| and |release|, also used in various other places throughout the
@@ -191,8 +182,8 @@ latex_elements = {
 # Grouping the document tree into LaTeX files. List of tuples
 # (source start file, target name, title, author, documentclass [howto/manual]).
 latex_documents = [
-  ('index', 'ratatosk.tex', u'ratatosk Documentation',
-   u'Per Unneberg', 'manual'),
+  ('index', 'doc.tex', u'project documentation',
+   u'ratatosk', 'howto'),
 ]
 
 # The name of an image file (relative to this directory) to place at the top of
@@ -221,8 +212,8 @@ latex_documents = [
 # One entry per manual page. List of tuples
 # (source start file, name, description, authors, manual section).
 man_pages = [
-    ('index', 'ratatosk', u'ratatosk Documentation',
-     [u'Per Unneberg'], 1)
+    ('index', 'ratatosk', u'project documentation',
+     [u'ratotosk'], 1)
 ]
 
 # If true, show URL addresses after external links.
@@ -235,8 +226,8 @@ man_pages = [
 # (source start file, target name, title, author,
 #  dir menu entry, description, category)
 texinfo_documents = [
-  ('index', 'ratatosk', u'ratatosk Documentation',
-   u'Per Unneberg', 'ratatosk', 'One line description of project.',
+  ('index', 'ratatosk', u'project documentation',
+   u'ratatosk', 'ratatosk', 'One line description of project.',
    'Miscellaneous'),
 ]
 
@@ -251,9 +242,5 @@ texinfo_documents = [
 
 
 # Example configuration for intersphinx: refer to the Python standard library.
-intersphinx_mapping = {
-  'python': ('http://python.readthedocs.org/en/latest/', None),
-  'django': ('http://django.readthedocs.org/en/latest/', None),
-  'sphinx': ('http://sphinx.readthedocs.org/en/latest/', None),
-  'ratatoskextscilife' : ('https://ratatosk.readthedocs.org/projects/ratatoskextscilife/en/latest/', None),
-    }
+# intersphinx_mapping = {
+#     }
